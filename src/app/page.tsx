@@ -11,7 +11,6 @@ type View = "loading" | "form" | "done";
 export default function InputPage() {
   const [view, setView] = useState<View>("loading");
   const [name, setName] = useState("");
-  const [team, setTeam] = useState("");
   const [content, setContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +37,6 @@ export default function InputPage() {
           const data = (await res.json()) as { pledge: Pledge };
           setSubmitted(data.pledge);
           setName(data.pledge.name);
-          setTeam(data.pledge.team);
           setContent(data.pledge.content);
           setView("done");
         } else {
@@ -58,8 +56,8 @@ export default function InputPage() {
     if (submitting) return;
     setError(null);
 
-    const payload = { name: name.trim(), team: team.trim(), content: content.trim() };
-    if (!payload.name || !payload.team || !payload.content) {
+    const payload = { name: name.trim(), content: content.trim() };
+    if (!payload.name || !payload.content) {
       setError("모든 항목을 입력해 주세요.");
       return;
     }
@@ -96,7 +94,6 @@ export default function InputPage() {
   function startEdit() {
     if (submitted) {
       setName(submitted.name);
-      setTeam(submitted.team);
       setContent(submitted.content);
     }
     setEditing(true);
@@ -129,7 +126,7 @@ export default function InputPage() {
           <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-baseline gap-2">
               <span className="text-lg font-bold text-slate-800">{submitted.name}</span>
-              <span className="text-sm text-slate-500">{submitted.team}</span>
+              {submitted.team && <span className="text-sm text-slate-500">{submitted.team}</span>}
             </div>
             <p className="mt-3 whitespace-pre-wrap break-words text-[15px] leading-relaxed text-slate-700">
               {submitted.content}
@@ -158,7 +155,7 @@ export default function InputPage() {
     <main className="min-h-[100dvh] bg-slate-50 px-5 py-8">
       <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-md flex-col">
         <header className="mb-6">
-          <h1 className="text-2xl font-bold text-slate-800">초심 다짐</h1>
+          <h1 className="text-2xl font-bold text-slate-800">나의 다짐</h1>
           <p className="mt-1.5 text-sm text-slate-500">
             {editing ? "내용을 수정한 뒤 다시 전송해 주세요." : "오늘의 다짐을 남겨 주세요."}
           </p>
@@ -172,19 +169,6 @@ export default function InputPage() {
             onChange={(e) => setName(e.target.value)}
             maxLength={LIMITS.name}
             placeholder="이름"
-            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-800 outline-none focus:border-slate-800"
-            autoComplete="off"
-          />
-        </label>
-
-        <label className="mb-4 block">
-          <span className="mb-1.5 block text-sm font-semibold text-slate-700">소속 센터</span>
-          <input
-            type="text"
-            value={team}
-            onChange={(e) => setTeam(e.target.value)}
-            maxLength={LIMITS.team}
-            placeholder="소속 센터"
             className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-800 outline-none focus:border-slate-800"
             autoComplete="off"
           />

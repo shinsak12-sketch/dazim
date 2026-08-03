@@ -253,7 +253,7 @@ function Board({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => voi
                   </span>
                 )}
                 <span className="text-3xl font-bold leading-tight">{p.name}</span>
-                <span className="mt-2 text-lg text-slate-400">{p.team}</span>
+                {p.team && <span className="mt-2 text-lg text-slate-400">{p.team}</span>}
               </button>
             ))}
           </div>
@@ -335,7 +335,7 @@ function PledgeOverlay({
       <div className="flex items-start justify-between px-16 pt-12">
         <div>
           <div className="text-6xl font-black">{p.name}</div>
-          <div className="mt-3 text-3xl text-indigo-300">{p.team}</div>
+          {p.team && <div className="mt-3 text-3xl text-indigo-300">{p.team}</div>}
         </div>
         <button
           onClick={onClose}
@@ -417,7 +417,7 @@ function AllView({ pledges, onClose }: { pledges: AdminPledge[]; onClose: () => 
             >
               <div className="flex items-baseline gap-3">
                 <span className="text-3xl font-bold">{p.name}</span>
-                <span className="text-xl text-indigo-300">{p.team}</span>
+                {p.team && <span className="text-xl text-indigo-300">{p.team}</span>}
                 {p.revealed && <span className="text-lg text-emerald-400">· 공개됨</span>}
               </div>
               <p className="mt-4 whitespace-pre-wrap break-words text-2xl leading-relaxed text-slate-200">

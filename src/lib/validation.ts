@@ -28,7 +28,7 @@ export function validatePledge(body: unknown): ValidationResult {
   if (name.length > LIMITS.name)
     return { ok: false, error: `이름은 ${LIMITS.name}자 이내로 입력해 주세요.` };
 
-  if (!team) return { ok: false, error: "소속 센터를 입력해 주세요." };
+  // 소속 센터는 선택 항목(미입력 시 빈 값으로 저장).
   if (team.length > LIMITS.team)
     return { ok: false, error: `소속은 ${LIMITS.team}자 이내로 입력해 주세요.` };
 
