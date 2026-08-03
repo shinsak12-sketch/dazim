@@ -3,18 +3,49 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AdminPledge } from "@/lib/types";
 import FitText from "@/components/FitText";
+import "./admin.css";
 
 const KEY_STORAGE = "dazim.adminKey";
+const THEME_STORAGE = "dazim.theme";
 const POLL_MS = 3000;
+const ACCENTS = ["green", "indigo", "teal", "amber", "coral"] as const;
+
+type Theme = "light" | "dark";
 
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
+  const [theme, setTheme] = useState<Theme>("light");
 
-  // 최초: 저장된 키 검증
+  // Pretendard 웹폰트 비차단 로드(사내망에서 막혀도 시스템 폰트로 자연 폴백)
   useEffect(() => {
-    const stored =
-      typeof window !== "undefined" ? window.localStorage.getItem(KEY_STORAGE) : null;
+    const href =
+      "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css";
+    if (document.querySelector(`link[href="${href}"]`)) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = href;
+    link.crossOrigin = "anonymous";
+    document.head.appendChild(link);
+  }, []);
+
+  // 테마 복원
+  useEffect(() => {
+    const stored = window.localStorage.getItem(THEME_STORAGE) as Theme | null;
+    if (stored === "light" || stored === "dark") setTheme(stored);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => {
+      const next = t === "dark" ? "light" : "dark";
+      window.localStorage.setItem(THEME_STORAGE, next);
+      return next;
+    });
+  }, []);
+
+  // 저장된 키 검증
+  useEffect(() => {
+    const stored = window.localStorage.getItem(KEY_STORAGE);
     if (!stored) {
       setChecking(false);
       return;
@@ -27,22 +58,27 @@ export default function AdminPage() {
     })();
   }, []);
 
-  if (checking) {
-    return (
-      <main className="flex h-[100dvh] items-center justify-center bg-slate-950 text-slate-500">
-        <div className="animate-pulse text-2xl">불러오는 중…</div>
-      </main>
-    );
-  }
-
-  if (!adminKey) {
-    return <KeyGate onSuccess={(k) => setAdminKey(k)} />;
-  }
-
-  return <Board adminKey={adminKey} onSignOut={() => {
-    window.localStorage.removeItem(KEY_STORAGE);
-    setAdminKey(null);
-  }} />;
+  return (
+    <div className="deck" data-theme={theme}>
+      {checking ? (
+        <div className="placeholder" style={{ flex: 1 }}>
+          <div className="sm">불러오는 중…</div>
+        </div>
+      ) : !adminKey ? (
+        <KeyGate onSuccess={(k) => setAdminKey(k)} theme={theme} toggleTheme={toggleTheme} />
+      ) : (
+        <Board
+          adminKey={adminKey}
+          theme={theme}
+          toggleTheme={toggleTheme}
+          onSignOut={() => {
+            window.localStorage.removeItem(KEY_STORAGE);
+            setAdminKey(null);
+          }}
+        />
+      )}
+    </div>
+  );
 }
 
 async function verifyKey(key: string): Promise<boolean> {
@@ -59,7 +95,15 @@ async function verifyKey(key: string): Promise<boolean> {
 
 /* ---------------- 관리자 키 입력 ---------------- */
 
-function KeyGate({ onSuccess }: { onSuccess: (key: string) => void }) {
+function KeyGate({
+  onSuccess,
+  theme,
+  toggleTheme,
+}: {
+  onSuccess: (key: string) => void;
+  theme: Theme;
+  toggleTheme: () => void;
+}) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -80,41 +124,54 @@ function KeyGate({ onSuccess }: { onSuccess: (key: string) => void }) {
   }
 
   return (
-    <main className="flex h-[100dvh] items-center justify-center bg-slate-950 px-6">
-      <form onSubmit={submit} className="w-full max-w-md">
-        <h1 className="mb-2 text-3xl font-bold text-white">강사용 화면</h1>
-        <p className="mb-8 text-slate-400">관리자 키를 입력해 주세요.</p>
+    <>
+      <div style={{ position: "absolute", top: 16, right: 16, zIndex: 3 }}>
+        <button className="btn sm" onClick={toggleTheme} title="라이트/다크 전환" aria-label="테마 전환">
+          {theme === "dark" ? "☀︎" : "☾"}
+        </button>
+      </div>
+      <form className="gate" onSubmit={submit}>
+        <span className="eyebrow">
+          <span className="dot" /> 진행자 화면
+        </span>
+        <h1 style={{ marginTop: "0.5em" }}>초심 다짐</h1>
+        <p>관리자 키를 입력해 주세요.</p>
         <input
           type="password"
+          className="field"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder="ADMIN KEY"
           autoFocus
-          className="w-full rounded-xl border border-slate-700 bg-slate-900 px-5 py-4 text-xl text-white outline-none focus:border-slate-400"
         />
-        {error && <div className="mt-4 text-sm text-red-400">{error}</div>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="mt-6 w-full rounded-xl bg-white py-4 text-xl font-bold text-slate-900 disabled:opacity-60"
-        >
+        {error && <div className="err">{error}</div>}
+        <button type="submit" className="btn primary submit" disabled={busy}>
           {busy ? "확인 중…" : "입장"}
         </button>
       </form>
-    </main>
+    </>
   );
 }
 
 /* ---------------- 발표 보드 ---------------- */
 
-function Board({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => void }) {
+function Board({
+  adminKey,
+  theme,
+  toggleTheme,
+  onSignOut,
+}: {
+  adminKey: string;
+  theme: Theme;
+  toggleTheme: () => void;
+  onSignOut: () => void;
+}) {
   const [pledges, setPledges] = useState<AdminPledge[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [overlayIndex, setOverlayIndex] = useState<number | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const pledgesRef = useRef<AdminPledge[]>([]);
-
   pledgesRef.current = pledges;
 
   const load = useCallback(async () => {
@@ -128,18 +185,16 @@ function Board({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => voi
       setPledges(data.pledges);
       setLoaded(true);
     } catch {
-      /* 폴링 중 일시 오류는 무시 */
+      /* 폴링 중 일시 오류 무시 */
     }
   }, [adminKey]);
 
-  // 3초 폴링
   useEffect(() => {
     load();
     const t = setInterval(load, POLL_MS);
     return () => clearInterval(t);
   }, [load]);
 
-  // 전체화면 상태 동기화
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener("fullscreenchange", onFsChange);
@@ -148,7 +203,6 @@ function Board({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => voi
 
   const reveal = useCallback(
     async (id: string) => {
-      // 낙관적 업데이트
       setPledges((prev) => prev.map((p) => (p.id === id ? { ...p, revealed: true } : p)));
       try {
         await fetch(`/api/pledges/${id}`, {
@@ -157,7 +211,7 @@ function Board({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => voi
           body: JSON.stringify({ revealed: true }),
         });
       } catch {
-        /* 무시: 다음 폴링에서 재동기화 */
+        /* 다음 폴링에서 재동기화 */
       }
     },
     [adminKey]
@@ -174,86 +228,83 @@ function Board({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => voi
   );
 
   const revealedCount = pledges.filter((p) => p.revealed).length;
+  const allRevealed = pledges.length > 0 && revealedCount === pledges.length;
 
   const pickRandom = useCallback(() => {
     const list = pledgesRef.current;
-    const candidates = list
-      .map((p, i) => ({ p, i }))
-      .filter(({ p }) => !p.revealed);
+    const candidates = list.map((p, i) => ({ p, i })).filter(({ p }) => !p.revealed);
     if (candidates.length === 0) return;
-    // 인덱스 기반 의사난수(브라우저 crypto 사용, 외부 의존성 없음)
-    const rnd = getRandomInt(candidates.length);
-    openAt(candidates[rnd].i);
+    openAt(candidates[getRandomInt(candidates.length)].i);
   }, [openAt]);
 
   async function toggleFullscreen() {
     try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
+      if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+      else await document.exitFullscreen();
     } catch {
-      /* 지원 안 하면 무시 */
+      /* 미지원 무시 */
     }
   }
 
   return (
-    <main className="flex h-[100dvh] flex-col bg-slate-950 text-white">
+    <>
       {/* 상단 바 */}
-      <header className="flex items-center justify-between px-10 pt-8 pb-5">
-        <h1 className="text-5xl font-black tracking-tight">초심 다짐</h1>
-        <div className="flex items-center gap-6">
-          <div className="text-right">
-            <div className="text-4xl font-bold tabular-nums">
+      <header className="topbar">
+        <div>
+          <span className="eyebrow">
+            <span className="dot" /> 진행자 화면 · 초심 다짐
+          </span>
+          <h1 className="headline" style={{ marginTop: "0.35em" }}>
+            오늘의 다짐
+          </h1>
+        </div>
+        <div className="count">
+          <div className="count-box">
+            <div className="count-num">
               {pledges.length}
-              <span className="ml-1 text-2xl font-medium text-slate-400">명 도착</span>
+              <span className="u">명 도착</span>
             </div>
-            <div className="text-lg text-slate-500">공개 {revealedCount} / {pledges.length}</div>
+            <div className="count-sub">
+              공개 {revealedCount} / {pledges.length}
+            </div>
           </div>
-          <button
-            onClick={onSignOut}
-            className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-400 hover:bg-slate-800"
-            title="관리자 키 재입력"
-          >
+          <button className="btn sm" onClick={toggleTheme} title="라이트/다크 전환" aria-label="테마 전환">
+            {theme === "dark" ? "☀︎" : "☾"}
+          </button>
+          <button className="btn sm" onClick={onSignOut} title="관리자 키 재입력">
             나가기
           </button>
         </div>
       </header>
 
       {/* 카드 그리드 */}
-      <section className="flex-1 overflow-y-auto px-10 pb-28">
+      <section className="board">
         {!loaded ? (
-          <div className="flex h-full items-center justify-center text-2xl text-slate-600">
-            불러오는 중…
+          <div className="placeholder">
+            <div className="sm">불러오는 중…</div>
           </div>
         ) : pledges.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-slate-600">
-            <div className="text-3xl font-semibold">아직 도착한 다짐이 없습니다</div>
-            <div className="mt-2 text-xl">QR을 스캔해 다짐을 남겨 주세요.</div>
+          <div className="placeholder">
+            <div className="big">아직 도착한 다짐이 없습니다</div>
+            <div className="sm">QR을 스캔해 다짐을 남겨 주세요.</div>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid">
             {pledges.map((p, i) => (
               <button
                 key={p.id}
+                className={p.revealed ? "name-card revealed" : "name-card"}
                 onClick={() => openAt(i)}
-                className={[
-                  "animate-card-in relative flex aspect-[4/3] flex-col items-center justify-center rounded-2xl border px-4 text-center transition",
-                  p.revealed
-                    ? "border-slate-800 bg-slate-900/50 opacity-40"
-                    : "border-slate-700 bg-slate-800 hover:border-slate-500 hover:bg-slate-700",
-                ].join(" ")}
               >
                 {p.revealed && (
-                  <span className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-white">
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
+                  <span className="check">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round">
                       <path d="M5 13l4 4L19 7" />
                     </svg>
                   </span>
                 )}
-                <span className="text-3xl font-bold leading-tight">{p.name}</span>
-                {p.team && <span className="mt-2 text-lg text-slate-400">{p.team}</span>}
+                <span className="nm">{p.name}</span>
+                {p.team && <span className="tm">{p.team}</span>}
               </button>
             ))}
           </div>
@@ -261,42 +312,29 @@ function Board({ adminKey, onSignOut }: { adminKey: string; onSignOut: () => voi
       </section>
 
       {/* 하단 툴바 */}
-      <footer className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-4 border-t border-slate-800 bg-slate-950/95 px-10 py-4 backdrop-blur">
-        <button
-          onClick={pickRandom}
-          disabled={pledges.every((p) => p.revealed)}
-          className="rounded-xl bg-indigo-600 px-7 py-3 text-xl font-bold hover:bg-indigo-500 disabled:opacity-40"
-        >
+      <footer className="toolbar">
+        <button className="btn primary lg" onClick={pickRandom} disabled={allRevealed}>
           🎲 랜덤 뽑기
         </button>
-        <button
-          onClick={() => setShowAll(true)}
-          disabled={pledges.length === 0}
-          className="rounded-xl bg-slate-700 px-7 py-3 text-xl font-bold hover:bg-slate-600 disabled:opacity-40"
-        >
+        <button className="btn lg" onClick={() => setShowAll(true)} disabled={pledges.length === 0}>
           전체 보기
         </button>
-        <button
-          onClick={toggleFullscreen}
-          className="rounded-xl border border-slate-700 px-7 py-3 text-xl font-bold hover:bg-slate-800"
-        >
+        <button className="btn lg" onClick={toggleFullscreen}>
           {isFullscreen ? "전체화면 해제" : "전체화면"}
         </button>
       </footer>
 
-      {/* 다짐 오버레이 */}
       {overlayIndex !== null && pledges[overlayIndex] && (
         <PledgeOverlay
           pledges={pledges}
           index={overlayIndex}
-          onNavigate={(i) => openAt(i)}
+          onNavigate={openAt}
           onClose={() => setOverlayIndex(null)}
         />
       )}
 
-      {/* 전체 보기 오버레이 */}
       {showAll && <AllView pledges={pledges} onClose={() => setShowAll(false)} />}
-    </main>
+    </>
   );
 }
 
@@ -328,58 +366,33 @@ function PledgeOverlay({
   }, [index, pledges.length, onNavigate, onClose]);
 
   if (!p) return null;
+  const accent = ACCENTS[index % ACCENTS.length];
 
   return (
-    <div className="animate-overlay-in fixed inset-0 z-50 flex flex-col bg-slate-950">
-      {/* 헤더 */}
-      <div className="flex items-start justify-between px-16 pt-12">
+    <div className="deck-overlay" data-accent={accent}>
+      <div className="ov-head">
         <div>
-          <div className="text-6xl font-black">{p.name}</div>
-          {p.team && <div className="mt-3 text-3xl text-indigo-300">{p.team}</div>}
+          <div className="ov-name">{p.name}</div>
+          {p.team && <div className="ov-team">{p.team}</div>}
         </div>
-        <button
-          onClick={onClose}
-          className="rounded-xl border border-slate-700 px-6 py-3 text-2xl font-bold text-slate-300 hover:bg-slate-800"
-        >
+        <button className="btn sm" onClick={onClose} aria-label="닫기">
           ✕ 닫기
         </button>
       </div>
 
-      {/* 본문 (자동 크기 조절) */}
-      <div className="relative flex flex-1 items-center px-8 py-8">
-        {/* 이전 */}
-        <button
-          onClick={() => hasPrev && onNavigate(index - 1)}
-          disabled={!hasPrev}
-          aria-label="이전"
-          className="flex h-20 w-20 flex-none items-center justify-center rounded-full bg-slate-800/70 text-4xl text-white hover:bg-slate-700 disabled:opacity-20"
-        >
+      <div className="ov-body">
+        <button className="navbtn" onClick={() => hasPrev && onNavigate(index - 1)} disabled={!hasPrev} aria-label="이전">
           ‹
         </button>
-
-        <div className="mx-6 flex h-full flex-1 items-center">
-          <FitText
-            key={p.id}
-            text={p.content}
-            min={24}
-            max={140}
-            className="w-full whitespace-pre-wrap break-words text-center font-semibold text-white"
-          />
+        <div style={{ position: "relative", flex: 1, alignSelf: "stretch", minWidth: 0 }}>
+          <FitText key={p.id} text={p.content} min={24} max={150} className="ov-quote" />
         </div>
-
-        {/* 다음 */}
-        <button
-          onClick={() => hasNext && onNavigate(index + 1)}
-          disabled={!hasNext}
-          aria-label="다음"
-          className="flex h-20 w-20 flex-none items-center justify-center rounded-full bg-slate-800/70 text-4xl text-white hover:bg-slate-700 disabled:opacity-20"
-        >
+        <button className="navbtn" onClick={() => hasNext && onNavigate(index + 1)} disabled={!hasNext} aria-label="다음">
           ›
         </button>
       </div>
 
-      {/* 하단 위치 표시 */}
-      <div className="pb-10 text-center text-2xl text-slate-500 tabular-nums">
+      <div className="ov-pos">
         {index + 1} / {pledges.length}
       </div>
     </div>
@@ -398,31 +411,23 @@ function AllView({ pledges, onClose }: { pledges: AdminPledge[]; onClose: () => 
   }, [onClose]);
 
   return (
-    <div className="animate-overlay-in fixed inset-0 z-50 flex flex-col bg-slate-950">
-      <div className="flex items-center justify-between px-16 py-8">
-        <h2 className="text-5xl font-black">전체 다짐 ({pledges.length})</h2>
-        <button
-          onClick={onClose}
-          className="rounded-xl border border-slate-700 px-6 py-3 text-2xl font-bold text-slate-300 hover:bg-slate-800"
-        >
+    <div className="deck-all">
+      <div className="all-head">
+        <h2 className="headline">전체 다짐 ({pledges.length})</h2>
+        <button className="btn sm" onClick={onClose} aria-label="닫기">
           ✕ 닫기
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto px-16 pb-16">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="all-body">
+        <div className="all-grid">
           {pledges.map((p) => (
-            <div
-              key={p.id}
-              className="rounded-2xl border border-slate-800 bg-slate-900 p-8"
-            >
-              <div className="flex items-baseline gap-3">
-                <span className="text-3xl font-bold">{p.name}</span>
-                {p.team && <span className="text-xl text-indigo-300">{p.team}</span>}
-                {p.revealed && <span className="text-lg text-emerald-400">· 공개됨</span>}
+            <div key={p.id} className="pcard">
+              <div className="ph">
+                <span className="pn">{p.name}</span>
+                {p.team && <span className="pt">{p.team}</span>}
+                {p.revealed && <span className="pr">· 공개됨</span>}
               </div>
-              <p className="mt-4 whitespace-pre-wrap break-words text-2xl leading-relaxed text-slate-200">
-                {p.content}
-              </p>
+              <p className="pc">{p.content}</p>
             </div>
           ))}
         </div>
@@ -440,6 +445,5 @@ function getRandomInt(max: number): number {
     window.crypto.getRandomValues(arr);
     return arr[0] % max;
   }
-  // 폴백 없음(브라우저 환경 보장). 안전상 0 반환.
   return 0;
 }

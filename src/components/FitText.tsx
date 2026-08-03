@@ -45,7 +45,10 @@ export default function FitText({ text, min = 20, max = 160, className = "" }: P
   }, [text, min, max]);
 
   return (
-    <div ref={boxRef} className="flex h-full w-full items-center justify-center overflow-hidden">
+    <div
+      ref={boxRef}
+      className="absolute inset-0 flex items-center justify-center overflow-hidden"
+    >
       <div
         ref={textRef}
         className={className}
