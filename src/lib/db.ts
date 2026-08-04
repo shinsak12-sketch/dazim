@@ -33,3 +33,33 @@ export const sql: NeonQueryFunction<false, false> = ((
 ) => {
   return getClient()(strings, ...values);
 }) as NeonQueryFunction<false, false>;
+
+// 스키마 지연 자동 생성.
+// schema.sql을 수동 실행하지 않아도 첫 DB 접근 시 테이블/인덱스를 만든다.
+// create ... if not exists 라 여러 번 호출·기존 DB에도 안전(멱등).
+let schemaReady: Promise<void> | null = null;
+
+export function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    const client = getClient();
+    schemaReady = (async () => {
+      await client`
+        create table if not exists pledges (
+          id text primary key,
+          name text not null,
+          team text not null default '',
+          content text not null,
+          revealed boolean not null default false,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        )
+      `;
+      await client`create index if not exists idx_pledges_created on pledges(created_at)`;
+    })().catch((e) => {
+      // 실패 시 다음 요청에서 재시도할 수 있도록 캐시 해제
+      schemaReady = null;
+      throw e;
+    });
+  }
+  return schemaReady;
+}

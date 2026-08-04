@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { sql, PledgeRow } from "@/lib/db";
+import { sql, ensureSchema, PledgeRow } from "@/lib/db";
 import { validatePledge } from "@/lib/validation";
 import { isAdmin } from "@/lib/auth";
 
@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
   }
   try {
+    await ensureSchema();
     const rows = (await sql`
       select id, name, team, content, revealed, created_at, updated_at
       from pledges
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
   const id = randomUUID();
 
   try {
+    await ensureSchema();
     const rows = (await sql`
       insert into pledges (id, name, team, content)
       values (${id}, ${name}, ${team}, ${content})

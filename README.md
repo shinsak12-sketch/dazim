@@ -38,6 +38,8 @@ cp .env.example .env.local
 
 ## 데이터베이스 초기화
 
+> 앱은 첫 DB 접근 시 `pledges` 테이블을 자동 생성(`create table if not exists`)하므로 **아래 수동 실행은 선택 사항**입니다. `DATABASE_URL`만 올바르면 별도 초기화 없이 동작합니다. 스키마를 미리 만들어 두려면 다음을 실행하세요.
+
 Neon 콘솔의 SQL Editor 또는 `psql`에서 `db/schema.sql`을 실행합니다.
 
 ```bash
@@ -86,5 +88,8 @@ npm run dev
 | `PATCH` | `/api/pledges/:id` | 공개/관리자 | 본인 내용 수정 / 관리자 공개 상태 변경 |
 | `GET` | `/api/stats` | 공개 | 제출 인원수 |
 | `POST` | `/api/admin/verify` | 관리자 | 관리자 키 확인 |
+| `GET` | `/api/health` | 공개 | 배포 진단(환경변수·DB 연결 상태) |
+
+배포 후 문제가 있으면 브라우저에서 `/api/health` 로 접속해 `hasDatabaseUrl`·`db`·`hint` 값을 확인하세요.
 
 관리자 인증은 요청 헤더 `x-admin-key` 값을 `ADMIN_KEY`와 비교합니다.

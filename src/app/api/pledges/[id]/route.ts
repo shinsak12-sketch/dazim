@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sql, PledgeRow } from "@/lib/db";
+import { sql, ensureSchema, PledgeRow } from "@/lib/db";
 import { validatePledge } from "@/lib/validation";
 import { isAdmin } from "@/lib/auth";
 
@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 // GET /api/pledges/[id] — 본인 제출 내용 조회(재접속 시 완료 화면 복원용).
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    await ensureSchema();
     const rows = (await sql`
       select id, name, team, content, revealed, created_at, updated_at
       from pledges
@@ -42,6 +43,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return NextResponse.json({ error: "인증이 필요합니다." }, { status: 401 });
     }
     try {
+      await ensureSchema();
       const rows = (await sql`
         update pledges
         set revealed = ${b.revealed}, updated_at = now()
@@ -65,6 +67,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   }
   const { name, team, content } = result.value;
   try {
+    await ensureSchema();
     const rows = (await sql`
       update pledges
       set name = ${name}, team = ${team}, content = ${content}, updated_at = now()
