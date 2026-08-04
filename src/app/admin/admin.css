@@ -546,6 +546,106 @@
   word-break: break-word;
 }
 
+/* ---------- QR 안내 오버레이 ---------- */
+.deck-qr {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(14px, 1.8vh, 26px);
+  padding: clamp(24px, 4vh, 56px);
+  background: var(--bg);
+  overflow: hidden;
+  animation: db-fade 0.28s ease both;
+}
+.deck-qr::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  width: 70vmax;
+  height: 70vmax;
+  border-radius: 50%;
+  top: -36vmax;
+  right: -20vmax;
+  background: radial-gradient(circle at center, color-mix(in srgb, var(--green) 18%, transparent), transparent 62%);
+  opacity: 0.55;
+  filter: blur(8px);
+}
+.deck-qr .qr-close {
+  position: absolute;
+  top: clamp(20px, 2.4vh, 40px);
+  right: clamp(24px, 2.6vw, 52px);
+  z-index: 2;
+}
+.deck-qr .qr-eyebrow {
+  position: relative;
+  z-index: 1;
+}
+.deck-qr .qr-title {
+  position: relative;
+  z-index: 1;
+  margin: 0.1em 0 0.2em;
+  font-weight: 800;
+  letter-spacing: -0.038em;
+  line-height: 1.1;
+  text-align: center;
+  font-size: clamp(28px, 3vw, 52px);
+}
+.deck-qr .qr-card {
+  position: relative;
+  z-index: 1;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  padding: clamp(16px, 1.8vw, 32px);
+  box-shadow: var(--shadow);
+}
+.deck-qr .qr-card svg {
+  display: block;
+  width: clamp(260px, 30vw, 500px);
+  height: auto;
+}
+.deck-qr .qr-loading {
+  width: clamp(260px, 30vw, 500px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+  font-weight: 700;
+}
+.deck-qr .qr-url {
+  position: relative;
+  z-index: 1;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: clamp(17px, 1.7vw, 30px);
+  color: var(--ink);
+  text-align: center;
+  word-break: break-all;
+}
+.deck-qr .qr-count {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  margin-top: clamp(6px, 1vh, 14px);
+  padding: 0.5em 1.4em;
+  border-radius: 999px;
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(18px, 1.7vw, 30px);
+  background: linear-gradient(180deg, var(--green-soft), var(--green));
+  box-shadow: 0 14px 30px -14px var(--green), var(--inset);
+}
+.deck-qr .qr-count .n {
+  font-size: 1.25em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- 관리자 키 게이트 ---------- */
 .deck .gate {
   position: relative;

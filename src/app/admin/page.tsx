@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 import type { AdminPledge } from "@/lib/types";
 import FitText from "@/components/FitText";
 import "./admin.css";
@@ -170,6 +171,7 @@ function Board({
   const [loaded, setLoaded] = useState(false);
   const [overlayIndex, setOverlayIndex] = useState<number | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [showQR, setShowQR] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const pledgesRef = useRef<AdminPledge[]>([]);
   pledgesRef.current = pledges;
@@ -313,6 +315,9 @@ function Board({
 
       {/* 하단 툴바 */}
       <footer className="toolbar">
+        <button className="btn lg" onClick={() => setShowQR(true)}>
+          📱 QR 코드
+        </button>
         <button className="btn primary lg" onClick={pickRandom} disabled={allRevealed}>
           🎲 랜덤 뽑기
         </button>
@@ -334,7 +339,70 @@ function Board({
       )}
 
       {showAll && <AllView pledges={pledges} onClose={() => setShowAll(false)} />}
+
+      {showQR && <QrView count={pledges.length} onClose={() => setShowQR(false)} />}
     </>
+  );
+}
+
+/* ---------------- QR 안내 오버레이 ---------------- */
+
+function QrView({ count, onClose }: { count: number; onClose: () => void }) {
+  const [svg, setSvg] = useState<string>("");
+  const [url, setUrl] = useState<string>("");
+
+  useEffect(() => {
+    // 배포된 입력 페이지(현재 사이트의 루트) 주소를 QR로 만든다. 외부 API 호출 없음.
+    const u = window.location.origin + "/";
+    setUrl(u);
+    QRCode.toString(u, {
+      type: "svg",
+      margin: 1,
+      width: 500,
+      errorCorrectionLevel: "M",
+      color: { dark: "#0f172a", light: "#ffffff" },
+    })
+      .then(setSvg)
+      .catch(() => setSvg(""));
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="deck-qr">
+      <button className="btn sm qr-close" onClick={onClose} aria-label="닫기">
+        ✕ 닫기
+      </button>
+
+      <span className="eyebrow qr-eyebrow">
+        <span className="dot" /> 참여 안내
+      </span>
+      <h2 className="qr-title">
+        휴대폰으로 QR을 스캔해
+        <br />
+        다짐을 남겨 주세요
+      </h2>
+
+      <div className="qr-card">
+        {svg ? (
+          <div dangerouslySetInnerHTML={{ __html: svg }} />
+        ) : (
+          <div className="qr-loading">QR 생성 중…</div>
+        )}
+      </div>
+
+      <div className="qr-url">{url}</div>
+
+      <div className="qr-count">
+        지금까지 <span className="n">{count}</span>명 참여
+      </div>
+    </div>
   );
 }
 
