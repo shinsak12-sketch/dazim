@@ -140,3 +140,73 @@ export function validatePath(path: string): string | null {
   if (/[\s<>"']/.test(path)) return "경로에 쓸 수 없는 문자가 있습니다.";
   return null;
 }
+
+export type EpisodeRef = {
+  /** 회차 숫자 앞 부분 (디코딩된 상태) */
+  before: string;
+  ep: number;
+  /** 앞 0 채움 자릿수 */
+  pad: number;
+  /** 회차 숫자 뒷 부분 (디코딩된 상태) */
+  after: string;
+};
+
+/**
+ * 경로에서 회차 숫자를 찾는다.
+ *
+ * 주의: 퍼센트 인코딩된 한글에는 숫자가 섞여 있다(%EB%82%98 등).
+ * 그래서 반드시 디코딩한 뒤에 찾는다. "마지막 숫자"를 그냥 집으면
+ * %ED%99%94(화)의 94를 회차로 오인한다.
+ */
+export function parseEpisode(path: string): EpisodeRef | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(path);
+  } catch {
+    return null;
+  }
+
+  // 1순위: "266화" 처럼 숫자 뒤에 화/話/회 가 붙은 형태
+  let m = decoded.match(/(\d+)(?=\s*[화話회])/);
+
+  // 2순위: 파일명 끝쪽 숫자 (예: /view/1234, /episode-88.html)
+  if (!m) {
+    const lastSlash = decoded.lastIndexOf("/");
+    const seg = decoded.slice(lastSlash + 1);
+    const segMatch = seg.match(/(\d+)(?!.*\d)/);
+    if (segMatch && segMatch.index !== undefined) {
+      const idx = lastSlash + 1 + segMatch.index;
+      return {
+        before: decoded.slice(0, idx),
+        ep: Number(segMatch[1]),
+        pad: segMatch[1].length,
+        after: decoded.slice(idx + segMatch[1].length),
+      };
+    }
+    return null;
+  }
+
+  const idx = m.index ?? 0;
+  return {
+    before: decoded.slice(0, idx),
+    ep: Number(m[1]),
+    pad: m[1].length,
+    after: decoded.slice(idx + m[1].length),
+  };
+}
+
+/**
+ * 회차를 바꾼 경로를 만든다. 반환값은 원본과 같은 방식으로 다시 인코딩된다.
+ * encodeURI는 _ . / - 를 건드리지 않으므로 원본 인코딩과 어긋나지 않는다.
+ */
+export function buildEpisodePath(ref: EpisodeRef, ep: number): string {
+  const n = Math.max(0, Math.trunc(ep));
+  const num = String(n).padStart(ref.pad, "0");
+  return encodeURI(`${ref.before}${num}${ref.after}`);
+}
+
+/** 화면에 띄울 회차 라벨. 회차를 못 찾으면 null. */
+export function episodeLabel(path: string): string | null {
+  const ref = parseEpisode(path);
+  return ref ? `${ref.ep}화` : null;
+}
