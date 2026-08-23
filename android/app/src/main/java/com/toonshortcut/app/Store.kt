@@ -18,6 +18,7 @@ class Store(context: Context) {
     companion object {
         private const val KEY_DOMAIN = "domain"
         private const val KEY_COMICS = "comics"
+        private const val KEY_AUTO_SAVE = "auto_save_episode"
         private val DEFAULT_DOMAIN = SiteUrl.Domain(head = "", prefix = "tkor", suffix = "com", pad = 3, num = 146)
     }
 
@@ -72,6 +73,11 @@ class Store(context: Context) {
             }
             prefs.edit().putString(KEY_COMICS, arr.toString()).apply()
         }
+
+    /** 회차 자동 저장 사용 여부. 끄면 상단 [저장] 버튼으로만 저장된다. */
+    var autoSaveEpisode: Boolean
+        get() = prefs.getBoolean(KEY_AUTO_SAVE, true)
+        set(value) = prefs.edit().putBoolean(KEY_AUTO_SAVE, value).apply()
 
     fun bumpDomain(delta: Int): SiteUrl.Domain {
         val d = domain
