@@ -88,6 +88,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         root.addView(web)
         setContentView(root)
+        root.padForSystemBars()
 
         configureWebView()
         refreshTitle()

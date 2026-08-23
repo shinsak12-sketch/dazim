@@ -27,7 +27,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = Store(this)
-        setContentView(buildLayout())
+        val root = buildLayout()
+        setContentView(root)
+        root.padForSystemBars()
         render()
         handleShare(intent)
     }
