@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { deleteComic, getDomain, insertComic, listComics, reorderComics, updateComic } from "@/lib/db";
-import { currentUser } from "@/lib/session";
+import { currentProfile } from "@/lib/profile";
 import { guessTitle, parseInput, sameShape, validatePath } from "@/lib/site";
 
 export const runtime = "nodejs";
@@ -14,14 +14,8 @@ function fail(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status });
 }
 
-async function requireUser() {
-  const user = await currentUser();
-  return user;
-}
-
 export async function GET() {
-  const user = await requireUser();
-  if (!user) return fail("로그인이 필요합니다.", 401);
+  const user = currentProfile();
   try {
     return NextResponse.json({ comics: await listComics(user) }, { headers: noStore });
   } catch (e) {
@@ -34,8 +28,7 @@ export async function GET() {
  * 붙여넣은 주소의 도메인 번호가 저장된 번호와 다르면 domainSuggestion으로 알려준다.
  */
 export async function POST(req: Request) {
-  const user = await requireUser();
-  if (!user) return fail("로그인이 필요합니다.", 401);
+  const user = currentProfile();
 
   let body: Record<string, unknown>;
   try {
@@ -81,8 +74,7 @@ export async function POST(req: Request) {
 
 /** { id, title?, path? } 로 수정하거나 { order: [id...] } 로 순서를 바꾼다. */
 export async function PATCH(req: Request) {
-  const user = await requireUser();
-  if (!user) return fail("로그인이 필요합니다.", 401);
+  const user = currentProfile();
 
   let body: Record<string, unknown>;
   try {
@@ -128,8 +120,7 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
-  const user = await requireUser();
-  if (!user) return fail("로그인이 필요합니다.", 401);
+  const user = currentProfile();
 
   const id = new URL(req.url).searchParams.get("id");
   if (!id) return fail("id가 필요합니다.");

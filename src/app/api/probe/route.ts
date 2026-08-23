@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDomain } from "@/lib/db";
 import { mapLimit, probeUrl } from "@/lib/probe";
-import { currentUser } from "@/lib/session";
+import { currentProfile } from "@/lib/profile";
 import { buildHost, clampNum } from "@/lib/site";
 
 export const runtime = "nodejs";
@@ -26,8 +26,7 @@ export type ProbeResult = {
  * 클라이언트가 임의 호스트명을 넣을 수 없게 해서 공격면을 좁혔다.
  */
 export async function POST(req: Request) {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  const user = currentProfile();
 
   let body: Record<string, unknown> = {};
   try {

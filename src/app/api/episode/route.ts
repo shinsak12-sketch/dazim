@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDomain, listComics } from "@/lib/db";
 import { mapLimit, probeUrl } from "@/lib/probe";
-import { currentUser } from "@/lib/session";
+import { currentProfile } from "@/lib/profile";
 import { buildEpisodePath, buildUrl, parseEpisode } from "@/lib/site";
 
 export const runtime = "nodejs";
@@ -17,8 +17,7 @@ export type EpisodeResult = { ep: number; path: string; exists: boolean; status?
  * 경로는 서버가 저장된 값에서 조립하므로 클라이언트가 임의 주소를 넣을 수 없다.
  */
 export async function POST(req: Request) {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  const user = currentProfile();
 
   let body: Record<string, unknown>;
   try {

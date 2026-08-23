@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDomain, saveDomain } from "@/lib/db";
-import { currentUser } from "@/lib/session";
+import { currentProfile } from "@/lib/profile";
 import { buildHost, clampNum, validatePattern, type DomainPattern } from "@/lib/site";
 
 export const runtime = "nodejs";
@@ -9,8 +9,7 @@ export const dynamic = "force-dynamic";
 const noStore = { "cache-control": "no-store" };
 
 export async function GET() {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  const user = currentProfile();
 
   try {
     const d = await getDomain();
@@ -25,8 +24,7 @@ export async function GET() {
  * 도메인 모양까지 바꾸려면 { head, prefix, suffix, pad, num } 을 보낸다.
  */
 export async function PATCH(req: Request) {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  const user = currentProfile();
 
   let body: Record<string, unknown>;
   try {

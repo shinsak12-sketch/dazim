@@ -66,10 +66,12 @@ async function api(path: string, init?: RequestInit) {
 
 export default function ComicList({
   user,
+  profiles,
   initialDomain,
   initialComics,
 }: {
   user: string;
+  profiles: string[];
   initialDomain: Domain;
   initialComics: ComicRow[];
 }) {
@@ -268,11 +270,15 @@ export default function ComicList({
     pending.current = { id: c.id, at: Date.now() };
   }, []);
 
-  const logout = useCallback(async () => {
-    await fetch("/api/logout", { method: "POST" });
-    router.replace("/login");
-    router.refresh();
-  }, [router]);
+  /** 비밀번호 없는 목록 전환. 고르면 그 프로필 목록으로 새로 읽어온다. */
+  const switchProfile = useCallback(
+    (name: string) =>
+      run(async () => {
+        await api("/api/profile", { method: "POST", body: JSON.stringify({ name }) });
+        router.refresh();
+      }),
+    [router, run],
+  );
 
   // 리다이렉트 최종 주소가 같은 모양의 다른 번호면 그게 정답일 가능성이 높다.
   const redirectHint = useMemo(() => {
@@ -289,13 +295,21 @@ export default function ComicList({
       <div className="mx-auto w-full max-w-xl px-4 py-5">
         <header className="flex items-center justify-between">
           <h1 className="text-lg font-bold tracking-tight">만화 바로가기</h1>
-          <button
-            type="button"
-            onClick={logout}
-            className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs text-slate-400 ring-1 ring-slate-800"
-          >
-            {user} · 나가기
-          </button>
+          <div className="flex items-center gap-1 rounded-lg bg-slate-900 p-1 ring-1 ring-slate-800">
+            {profiles.map((p) => (
+              <button
+                key={p}
+                type="button"
+                disabled={busy}
+                onClick={() => switchProfile(p)}
+                className={`rounded px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                  p === user ? "bg-sky-500 text-slate-950" : "text-slate-400"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
         </header>
 
         <DomainBar

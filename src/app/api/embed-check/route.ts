@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDomain, listComics } from "@/lib/db";
 import { probeUrl } from "@/lib/probe";
-import { currentUser } from "@/lib/session";
+import { currentProfile } from "@/lib/profile";
 import { buildUrl } from "@/lib/site";
 
 export const runtime = "nodejs";
@@ -33,8 +33,7 @@ function frameAncestorsOf(csp: string | undefined): string | undefined {
  * 브라우저에서는 차단돼도 onload가 불려서 구분이 안 되므로 서버에서 헤더를 직접 본다.
  */
 export async function POST(req: Request) {
-  const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  const user = currentProfile();
 
   let body: Record<string, unknown> = {};
   try {
