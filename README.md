@@ -1,95 +1,87 @@
-# 초심 다짐 실시간 수집 웹앱
+# 만화 바로가기
 
-사내 교육에서 직원이 휴대폰으로 다짐을 제출하고, 강사가 프로젝터 화면에서 이름 카드를 클릭해 하나씩 공개하며 발표하는 실시간 수집·발표 도구입니다.
+번호가 계속 바뀌는 사이트(`tkor146.com` → `tkor147.com` → …) 주소를,
+주소창에서 손으로 고치는 대신 **버튼 한 번으로 갱신**하는 웹앱입니다.
 
-## 화면
+## 어떻게 쓰나
 
-| 경로 | 용도 | 기기 |
-| --- | --- | --- |
-| `/` | 직원 다짐 입력 | 휴대폰(세로) |
-| `/admin` | 강사용 발표 화면 | 프로젝터(1920×1080) |
-| `/qr` | QR 안내 화면 | 프로젝터 |
+1. 계정을 고르고 PIN을 입력합니다.
+2. 만화 목록에서 **열기** 를 누르면 새 탭으로 그 화가 열립니다.
+3. 안 열리면 앱 탭으로 돌아와 상단의 **`+`** 를 누릅니다.
+   번호가 1 올라가고, 목록의 모든 만화 주소가 한꺼번에 새 번호로 바뀝니다.
+4. 몇 번씩 누르기 귀찮으면 **되는 번호 자동으로 찾기** 를 누릅니다.
 
-- **`/`** — 이름/다짐(300자, 실시간 글자수)을 입력해 제출합니다. 제출하면 완료 화면에서 본인 다짐을 다시 보여주고 **수정하기**로 재전송할 수 있습니다. `localStorage`에 제출 id를 저장해 재접속 시 완료 화면으로 바로 이동하며, 전송 중에는 버튼이 비활성화됩니다.
-- **`/admin`** — 관리자 키 입력 후 진입합니다. 도착한 사람의 **이름·소속 카드**가 그리드로 쌓이고(3초 폴링, 등장 애니메이션), 카드를 클릭하면 전체화면 오버레이로 다짐이 크게 뜹니다. 다짐 본문은 길이에 따라 글자 크기가 자동 조절됩니다. 좌우 화살표·방향키로 이동하고 `ESC`로 닫습니다. 공개한 카드는 흐리게+체크 표시됩니다. 하단 툴바에 **랜덤 뽑기 / 전체 보기 / 전체화면 토글**이 있습니다. 카드에는 다짐 내용이 절대 표시되지 않습니다.
-- **`/qr`** — 입력 페이지 주소의 QR을 크게 표시하고(서버에서 생성, 외부 API 미사용) 주소 텍스트와 현재 참여 인원수를 함께 보여줍니다.
+### 자동 찾기는 어떻게 판단하나
 
-## 기술 스택
+브라우저는 보안 정책(CORS) 때문에 다른 사이트의 응답 내용을 읽을 수 없습니다.
+그래서 두 군데서 나눠 확인합니다.
 
-- Next.js (App Router) + TypeScript
-- Neon(Postgres, serverless) — `@neondatabase/serverless`
-- Tailwind CSS (외부 UI 라이브러리 없음)
-- 실시간 갱신은 3초 폴링(SSE 미사용)
-- QR 코드는 `qrcode` 패키지로 서버 사이드 생성(외부 API 호출 없음)
+| 확인 주체 | 방법 | 알 수 있는 것 |
+|---|---|---|
+| 서버 (Vercel) | DNS 조회 + HTTPS 요청 | 그 번호의 도메인이 **개설됐는지**, 리다이렉트 최종 도착지 |
+| 내 브라우저 | `fetch(mode:'no-cors')` 성공/실패 | **내 회선에서 접속되는지** |
+
+둘 다 통과한 첫 번째 번호를 추천합니다.
+사이트가 새 주소로 리다이렉트를 걸어둔 경우에는 스캔 없이 바로 그 번호를 알려줍니다.
+
+브라우저 쪽 확인은 연결 성공/실패만 보는 것이라 100% 정확하지는 않습니다.
+결과가 이상하면 목록에서 직접 번호를 골라 열어보세요.
+
+## 계정
+
+- 계정은 DB가 아니라 환경변수로 관리합니다. 소규모(2명) 전용입니다.
+- 로그인하면 HMAC 서명된 httpOnly 쿠키가 30일 유지됩니다.
+- **만화 목록은 계정별로 분리**되고, **도메인 번호는 두 계정이 공유**합니다.
+  한 명이 새 번호를 찾아두면 다른 한 명도 바로 그 번호로 열립니다.
 
 ## 환경변수
 
-`.env.example`을 복사해 `.env.local`을 만들고 값을 채웁니다.
+| 이름 | 설명 |
+|---|---|
+| `DATABASE_URL` | Neon Postgres 연결 문자열 |
+| `ACCOUNTS` | `이름:PIN` 을 쉼표로 구분. 예: `남편:1234,아내:5678` |
+| `AUTH_SECRET` | 세션 서명 키. 16자 이상 랜덤 문자열 (`openssl rand -base64 32`) |
 
-```bash
-cp .env.example .env.local
-```
+배포 후 `/api/health` 를 열면 어떤 값이 빠졌는지, DB 연결이 되는지 확인할 수 있습니다.
 
-| 변수 | 필수 | 설명 |
-| --- | --- | --- |
-| `DATABASE_URL` | ✅ | Neon Postgres 연결 문자열 |
-| `ADMIN_KEY` | ✅ | `/admin` 진입 키 |
-| `APP_URL` | ⬜ | QR이 가리킬 입력 페이지 주소. 미설정 시 요청 헤더에서 자동 추론 |
-
-## 데이터베이스 초기화
-
-> 앱은 첫 DB 접근 시 `pledges` 테이블을 자동 생성(`create table if not exists`)하므로 **아래 수동 실행은 선택 사항**입니다. `DATABASE_URL`만 올바르면 별도 초기화 없이 동작합니다. 스키마를 미리 만들어 두려면 다음을 실행하세요.
-
-Neon 콘솔의 SQL Editor 또는 `psql`에서 `db/schema.sql`을 실행합니다.
-
-```bash
-psql "$DATABASE_URL" -f db/schema.sql
-```
-
-또는 Neon 웹 콘솔 → SQL Editor에 `db/schema.sql` 내용을 붙여넣고 실행합니다.
-
-```sql
-create table if not exists pledges (
-  id text primary key,
-  name text not null,
-  team text not null,
-  content text not null,
-  revealed boolean not null default false,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create index if not exists idx_pledges_created on pledges(created_at);
-```
-
-## 로컬 실행
+## 개발
 
 ```bash
 npm install
+cp .env.example .env.local   # 값 채우기
 npm run dev
 ```
 
-- 입력: http://localhost:3000/
-- 강사용: http://localhost:3000/admin
-- QR 안내: http://localhost:3000/qr
+테이블은 첫 DB 접근 시 자동 생성됩니다 (`src/lib/db.ts`의 `ensureSchema`).
+스키마 원본은 `db/schema.sql` 에 있습니다.
 
-## Vercel 배포
+## 구조
 
-1. 이 저장소를 Vercel 프로젝트로 가져옵니다.
-2. **Settings → Environment Variables** 에 `DATABASE_URL`, `ADMIN_KEY`(필요 시 `APP_URL`)를 등록합니다.
-3. 배포 후 Neon에서 `db/schema.sql`을 1회 실행합니다.
+```
+src/
+  middleware.ts          로그인 안 했으면 /login 으로
+  lib/
+    site.ts              도메인 패턴 파싱·조립·검증 (클라이언트/서버 공용)
+    auth.ts              환경변수 계정 + HMAC 서명 쿠키
+    session.ts           라우트 핸들러용 세션 판독
+    db.ts                Neon 접근 + 스키마 자동 생성
+  app/
+    login/               계정 선택 + PIN
+    page.tsx             목록 (서버에서 초기 데이터 로드)
+    ComicList.tsx        목록 UI 본체
+    api/
+      login, logout      세션 발급/파기
+      domain             번호 조회·변경 (공용)
+      comics             만화 CRUD + 순서 (계정별)
+      probe              번호 후보 서버 확인
+      health             환경변수·DB 점검
+```
 
-## API 개요
+## 보안 메모
 
-| 메서드 | 경로 | 인증 | 설명 |
-| --- | --- | --- | --- |
-| `POST` | `/api/pledges` | 공개 | 다짐 신규 제출 |
-| `GET` | `/api/pledges` | 관리자 | 전체 다짐 목록(내용 포함) |
-| `GET` | `/api/pledges/:id` | 공개 | 본인 제출 조회(id 소지자) |
-| `PATCH` | `/api/pledges/:id` | 공개/관리자 | 본인 내용 수정 / 관리자 공개 상태 변경 |
-| `GET` | `/api/stats` | 공개 | 제출 인원수 |
-| `POST` | `/api/admin/verify` | 관리자 | 관리자 키 확인 |
-| `GET` | `/api/health` | 공개 | 배포 진단(환경변수·DB 연결 상태) |
+`probe` API는 서버가 외부로 요청을 보내므로 SSRF에 주의해서 만들었습니다.
 
-배포 후 문제가 있으면 브라우저에서 `/api/health` 로 접속해 `hasDatabaseUrl`·`db`·`hint` 값을 확인하세요.
-
-관리자 인증은 요청 헤더 `x-admin-key` 값을 `ADMIN_KEY`와 비교합니다.
+- 클라이언트는 호스트명을 직접 보낼 수 없습니다. **저장된 패턴으로 서버가 조립**합니다.
+- DNS 조회 결과가 사설·루프백·링크로컬 대역이면 요청하지 않습니다.
+- `https`만 사용하고, **응답 본문은 반환하지 않습니다** (`<title>` 80자만).
+- 로그인 필수, 한 번에 20개까지, 요청당 7초 타임아웃.

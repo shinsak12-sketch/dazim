@@ -1,8 +1,8 @@
 {
-  "name": "dazim",
+  "name": "toon-shortcut",
   "version": "1.0.0",
   "private": true,
-  "description": "초심 다짐 실시간 수집·발표 웹앱",
+  "description": "번호가 바뀌는 만화 사이트 주소를 버튼 한 번으로 갱신하는 웹앱",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -12,13 +12,11 @@
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
     "next": "^14.2.35",
-    "qrcode": "^1.5.4",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "@types/qrcode": "^1.5.5",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
