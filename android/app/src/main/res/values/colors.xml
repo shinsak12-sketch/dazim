@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#FF020617</color>
-    <color name="surface">#FF0F172A</color>
-    <color name="accent">#FF0EA5E9</color>
-    <color name="ic_launcher_background">#FF0F172A</color>
+    <!-- Ui.kt 의 값과 같게 유지한다. 테마/시스템 바에서만 쓴다. -->
+    <color name="bg">#FF0B1120</color>
+    <color name="surface">#FF151E2E</color>
+    <color name="accent">#FF38BDF8</color>
 </resources>

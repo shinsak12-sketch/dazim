@@ -24,25 +24,27 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import org.json.JSONObject
 
 /**
  * 만화 사이트를 앱 안에서 직접 연다.
  *
- * 저장은 전부 사용자가 누를 때만 일어난다. 주소 번호도 회차도 앱이 알아서
- * 바꾸지 않는다. 잘못 눌렀을 때 되돌리기 쉬워야 하고, 무엇이 저장됐는지
- * 항상 눈에 보여야 하기 때문이다.
+ * 주소 번호는 앱이 스스로 바꾸지 않는다. 막혔을 때 다음 번호가 맞는지는 추측이고,
+ * 틀리면 되돌리기가 번거롭기 때문이다. 회차는 실제로 그 페이지를 열었다는
+ * 사실이라 추측이 아니므로 자동으로 저장한다.
  */
 class ReaderActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_COMIC_ID = "comic_id"
-        /** 목록에서 "최신화 보기"로 들어올 때 건너뛸 회차 */
+        /** 목록에서 "새 회차 보기"로 들어올 때 건너뛸 회차 */
         const val EXTRA_EPISODE = "episode"
     }
 
     private lateinit var store: Store
     private lateinit var web: WebView
     private lateinit var titleView: TextView
+    private lateinit var hostView: TextView
     private lateinit var progress: ProgressBar
     private lateinit var errorBar: LinearLayout
     private lateinit var errorText: TextView
@@ -64,11 +66,10 @@ class ReaderActivity : AppCompatActivity() {
             return
         }
 
-        // 목록에서 최신화로 바로 들어온 경우 그 회차부터 연다.
+        // 목록에서 새 회차로 바로 들어온 경우 그 회차부터 연다.
         val jumpTo = intent.getIntExtra(EXTRA_EPISODE, -1)
         if (jumpTo > 0) {
-            val c = comic
-            val ref = c?.let { SiteUrl.parseEpisode(it.path) }
+            val ref = comic?.let { SiteUrl.parseEpisode(it.path) }
             if (ref != null && ref.ep != jumpTo) {
                 store.updateComic(comicId, path = SiteUrl.buildEpisodePath(ref, jumpTo))
             }
@@ -76,14 +77,15 @@ class ReaderActivity : AppCompatActivity() {
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#020617"))
+            setBackgroundColor(Ui.BG)
         }
         root.addView(buildToolbar())
         root.addView(buildErrorBar())
 
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(2))
+            progressTintList = android.content.res.ColorStateList.valueOf(Ui.ACCENT)
             visibility = View.GONE
         }
         root.addView(progress)
@@ -114,39 +116,52 @@ class ReaderActivity : AppCompatActivity() {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#0F172A"))
-            setPadding(dp(4), dp(6), dp(4), dp(6))
+            setBackgroundColor(Ui.SURFACE)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
         }
 
         // 사이트 자체에 이전/다음 버튼이 있으므로 앱에는 목록으로 나가는 길만 둔다.
-        bar.addView(outlineButton("목록") { finish() })
+        bar.addView(softButton("목록") { finish() })
 
-        titleView = TextView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            setTextColor(Color.parseColor("#E2E8F0"))
-            textSize = 12f
-            maxLines = 2
-            setPadding(dp(4), 0, dp(4), 0)
+        val texts = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(8)
+            }
         }
-        bar.addView(titleView)
+        titleView = TextView(this).apply {
+            textSize = 13f
+            maxLines = 1
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Ui.TEXT)
+        }
+        hostView = TextView(this).apply {
+            textSize = 10.5f
+            maxLines = 1
+            setTextColor(Ui.TEXT_FAINT)
+        }
+        texts.addView(titleView)
+        texts.addView(hostView)
+        bar.addView(texts)
 
-        // 지금 보고 있는 주소를 이 만화의 진행 상황으로 저장한다. 저장은 이 버튼으로만 일어난다.
-        bar.addView(filledButton("저장", "#0EA5E9") { saveCurrent() })
-        bar.addView(outlineButton("주소+1") { bumpDomain(1) })
-        bar.addView(iconButton("⋮") { showMenu() })
+        bar.addView(accentButton("저장") { saveCurrent() })
+        bar.addWithGap(softButton("+1") { bumpDomain(1) }, dp(6))
+        bar.addWithGap(softButton("⋮") { showMenu() }, dp(6))
         return bar
     }
 
     private fun buildErrorBar(): View {
         errorBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#422006"))
-            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = Ui.rounded(Ui.alpha(Ui.AMBER, 30), 0, context)
+            setPadding(dp(14), dp(12), dp(14), dp(12))
             visibility = View.GONE
         }
         errorText = TextView(this).apply {
-            textSize = 12f
-            setTextColor(Color.parseColor("#FDE68A"))
+            textSize = 12.5f
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setTextColor(Ui.AMBER)
         }
         errorBar.addView(errorText)
 
@@ -154,54 +169,50 @@ class ReaderActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) }
+            ).apply { topMargin = dp(10) }
         }
-        row.addView(outlineButton("주소 +1") { bumpDomain(1) })
-        row.addView(outlineButton("번호 입력") { askDomainNumber() })
-        row.addView(outlineButton("다시 시도") { load() })
-        row.addView(outlineButton("닫기") { errorBar.visibility = View.GONE })
+        row.addView(softButton("주소 +1") { bumpDomain(1) })
+        row.addWithGap(softButton("번호 입력") { askDomainNumber() }, dp(6))
+        row.addWithGap(softButton("다시 시도") { load() }, dp(6))
+        row.addWithGap(softButton("닫기") { errorBar.visibility = View.GONE }, dp(6))
         errorBar.addView(row)
         return errorBar
     }
 
-    private fun iconButton(label: String, onClick: () -> Unit): TextView =
+    private fun softButton(label: String, onClick: () -> Unit): TextView =
         TextView(this).apply {
             text = label
-            textSize = 18f
-            gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#CBD5E1"))
-            setPadding(dp(10), dp(6), dp(10), dp(6))
-            isClickable = true
-            setOnClickListener { onClick() }
-        }
-
-    private fun filledButton(label: String, color: String, onClick: () -> Unit): TextView =
-        TextView(this).apply {
-            text = label
-            textSize = 12f
+            textSize = 12.5f
             gravity = Gravity.CENTER
             setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#020617"))
-            setBackgroundColor(Color.parseColor(color))
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            isClickable = true
+            setTextColor(Ui.TEXT)
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+            Ui.tappable(this, Ui.rounded(Ui.SURFACE_HI, 12, context, Ui.BORDER))
             setOnClickListener { onClick() }
         }
 
-    private fun outlineButton(label: String, onClick: () -> Unit): TextView =
+    private fun accentButton(label: String, onClick: () -> Unit): TextView =
         TextView(this).apply {
             text = label
-            textSize = 12f
+            textSize = 12.5f
             gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#E2E8F0"))
-            setBackgroundColor(Color.parseColor("#1E293B"))
-            setPadding(dp(10), dp(8), dp(10), dp(8))
-            isClickable = true
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { rightMargin = dp(6) }
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Ui.ON_ACCENT)
+            setPadding(dp(14), dp(9), dp(14), dp(9))
+            Ui.tappable(this, Ui.rounded(Ui.ACCENT, 12, context))
             setOnClickListener { onClick() }
         }
+
+    /**
+     * 왼쪽 여백을 주며 붙인다.
+     * addView(View, Int) 로 만들면 ViewGroup 의 "삽입 위치" 오버로드와 겹쳐
+     * 멤버 함수가 우선 선택되므로 이름을 따로 둔다.
+     */
+    private fun LinearLayout.addWithGap(view: View, leftGap: Int) {
+        addView(view, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { leftMargin = leftGap })
+    }
 
     private fun showMenu() {
         val d = store.domain
@@ -238,7 +249,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), 0)
+            setPadding(dp(24), dp(12), dp(24), 0)
             addView(input)
         }
         AlertDialog.Builder(this)
@@ -266,10 +277,7 @@ class ReaderActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ 저장
 
-    /**
-     * 지금 보고 있는 주소를 이 만화에 반영한다. 주소 번호와 회차를 한꺼번에 저장한다.
-     * 다른 작품으로 보이면 실수일 수 있으므로 먼저 확인한다.
-     */
+    /** 지금 보고 있는 주소를 이 만화에 반영한다. 주소 번호와 회차를 한꺼번에 저장한다. */
     private fun saveCurrent() {
         val url = web.url
         if (url == null) {
@@ -324,7 +332,63 @@ class ReaderActivity : AppCompatActivity() {
 
         errorBar.visibility = View.GONE
         refreshTitle()
+        refreshNextFromPage()
         toast(if (messages.isEmpty()) "이미 저장된 주소입니다." else "저장: ${messages.joinToString(" · ")}")
+    }
+
+    /**
+     * 같은 작품의 다른 회차로 넘어가면 알아서 저장한다.
+     *
+     * 회차 숫자 앞뒤 문자열이 똑같을 때만 같은 작품으로 본다.
+     * 사이트 안에서 다른 작품으로 넘어가도 이 만화의 북마크를 덮어쓰지 않는다.
+     */
+    private fun autoSaveEpisode(url: String) {
+        if (!store.autoSaveEpisode) return
+        val c = comic ?: return
+        val parsed = SiteUrl.parseInput(url) ?: return
+        val old = SiteUrl.parseEpisode(c.path) ?: return
+        val new = SiteUrl.parseEpisode(parsed.path) ?: return
+        if (old.before != new.before || old.after != new.after) return // 다른 작품
+        if (old.ep == new.ep) return
+
+        store.updateComic(comicId, path = parsed.path)
+        toast("${new.ep}화 저장")
+    }
+
+    /**
+     * 지금 열린 페이지에 다음 화 링크가 있는지 보고 목록의 표시를 갱신한다.
+     *
+     * 목록의 일괄 확인이 실패한 만화도 한 번 열어보면 여기서 결과가 채워진다.
+     * 보고 있는 회차가 저장된 회차와 다를 때는 판단하지 않는다.
+     * 그 결과는 다른 회차에 대한 것이라 저장해두면 틀린 정보가 된다.
+     */
+    private fun refreshNextFromPage() {
+        val c = comic ?: return
+        val ref = SiteUrl.parseEpisode(c.path) ?: return
+        val viewing = web.url?.let { SiteUrl.parseInput(it) }?.let { SiteUrl.parseEpisode(it.path) }
+        if (viewing == null || viewing.ep != ref.ep) return
+
+        val nextPath = SiteUrl.buildEpisodePath(ref, ref.ep + 1)
+        val encoded = JSONObject.quote(nextPath.substringAfterLast('/').lowercase())
+        val decoded = JSONObject.quote(SiteUrl.decodeUri(nextPath).substringAfterLast('/'))
+
+        val js = """
+            (function () {
+              try {
+                var h = document.documentElement.outerHTML;
+                var l = h.toLowerCase();
+                return (l.indexOf($encoded) >= 0 || h.indexOf($decoded) >= 0) ? "1" : "0";
+              } catch (e) { return "?"; }
+            })()
+        """.trimIndent()
+
+        web.evaluateJavascript(js) { raw ->
+            when (raw?.trim()?.trim('"')) {
+                "1" -> store.setNext(comicId, NextStatus.YES)
+                "0" -> store.setNext(comicId, NextStatus.NO)
+                else -> Unit // 판단 불가. 기존 값을 건드리지 않는다.
+            }
+        }
     }
 
     // ------------------------------------------------------------------ WebView
@@ -361,6 +425,7 @@ class ReaderActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 if (url != null) autoSaveEpisode(url)
                 refreshTitle()
+                refreshNextFromPage()
             }
 
             override fun onReceivedError(
@@ -374,28 +439,6 @@ class ReaderActivity : AppCompatActivity() {
                 showError()
             }
         }
-    }
-
-    /**
-     * 같은 작품의 다른 회차로 넘어가면 알아서 저장한다.
-     *
-     * 주소 번호는 건드리지 않는다. 그건 막혔을 때의 추측이라 사용자가 고를 일이고,
-     * 회차는 실제로 그 페이지를 열었다는 사실이라 추측이 아니다.
-     *
-     * 회차 숫자 앞뒤 문자열이 똑같을 때만 같은 작품으로 본다.
-     * 사이트 안에서 다른 작품으로 넘어가도 이 만화의 북마크를 덮어쓰지 않는다.
-     */
-    private fun autoSaveEpisode(url: String) {
-        if (!store.autoSaveEpisode) return
-        val c = comic ?: return
-        val parsed = SiteUrl.parseInput(url) ?: return
-        val old = SiteUrl.parseEpisode(c.path) ?: return
-        val new = SiteUrl.parseEpisode(parsed.path) ?: return
-        if (old.before != new.before || old.after != new.after) return // 다른 작품
-        if (old.ep == new.ep) return
-
-        store.updateComic(comicId, path = parsed.path)
-        toast("${new.ep}화 저장")
     }
 
     /** 번호를 대신 바꾸지 않는다. 무엇을 할지는 사용자가 고른다. */
@@ -422,10 +465,7 @@ class ReaderActivity : AppCompatActivity() {
         load()
     }
 
-    /**
-     * 제목에는 저장된 회차를, 아래 줄에는 지금 보고 있는 주소를 보여준다.
-     * 저장된 것과 보고 있는 것이 다르면 눈에 보이도록 표시한다.
-     */
+    /** 제목에는 저장된 회차를, 아래 줄에는 지금 보고 있는 주소를 보여준다. */
     private fun refreshTitle() {
         val c = comic
         val saved = c?.let { SiteUrl.episodeLabel(it.path) }
@@ -436,17 +476,16 @@ class ReaderActivity : AppCompatActivity() {
         val host = viewing?.domain?.let { SiteUrl.buildHost(it) } ?: SiteUrl.buildHost(store.domain)
 
         val unsaved = viewingLabel != null && saved != null && viewingLabel != saved
-        val line2 = if (unsaved) "$host · 보는 중 $viewingLabel (저장 안 됨)" else host
 
-        titleView.text = if (saved != null) "$name · $saved\n$line2" else "$name\n$line2"
-        titleView.setTextColor(
-            if (unsaved) Color.parseColor("#FDE68A") else Color.parseColor("#E2E8F0"),
-        )
+        titleView.text = if (saved != null) "$name · $saved" else name
+        titleView.setTextColor(if (unsaved) Ui.AMBER else Ui.TEXT)
+        hostView.text = if (unsaved) "$host · 보는 중 $viewingLabel (저장 안 됨)" else host
+        hostView.setTextColor(if (unsaved) Ui.AMBER else Ui.TEXT_FAINT)
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dp(v: Int): Int = Ui.dp(this, v)
 
     override fun onDestroy() {
         web.destroy()

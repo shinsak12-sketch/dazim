@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.ToonShortcut" parent="Theme.Material3.Dark.NoActionBar">
-        <item name="android:statusBarColor">@color/surface</item>
-        <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowBackground">@color/bg</item>
         <item name="colorPrimary">@color/accent</item>
+        <!-- targetSdk 35 에서는 시스템 바가 투명하게 강제된다. 뷰 쪽에서 여백을 준다. -->
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>

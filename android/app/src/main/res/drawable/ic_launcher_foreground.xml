@@ -4,15 +4,24 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 책 모양 -->
+    <!--
+      어댑티브 아이콘은 바깥이 잘리므로 가운데 66dp 안에만 그린다.
+      작게 줄여도 알아볼 수 있도록 형태를 둘로만 유지했다.
+    -->
+
+    <!-- 뒤에 살짝 보이는 페이지 (여러 화가 쌓여 있다는 느낌) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillAlpha="0.35"
+        android:pathData="M42,30 L74,30 A7,7 0 0 1 81,37 L81,71 A7,7 0 0 1 74,78 L42,78 A7,7 0 0 1 35,71 L35,37 A7,7 0 0 1 42,30 Z" />
+
+    <!-- 앞쪽 페이지 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M34,26 L66,26 A7,7 0 0 1 73,33 L73,75 A7,7 0 0 1 66,82 L34,82 A7,7 0 0 1 27,75 L27,33 A7,7 0 0 1 34,26 Z" />
+
+    <!-- 다음으로 넘어간다는 뜻의 화살표 -->
     <path
         android:fillColor="#FF0EA5E9"
-        android:pathData="M32,34 L52,34 A2,2 0 0 1 54,36 L54,74 A2,2 0 0 0 52,72 L32,72 A2,2 0 0 1 30,70 L30,36 A2,2 0 0 1 32,34 Z" />
-    <path
-        android:fillColor="#FF7DD3FC"
-        android:pathData="M56,34 L76,34 A2,2 0 0 1 78,36 L78,70 A2,2 0 0 1 76,72 L56,72 A2,2 0 0 0 54,74 L54,36 A2,2 0 0 1 56,34 Z" />
-    <!-- 위로 향하는 화살표 (번호가 올라간다는 뜻) -->
-    <path
-        android:fillColor="#FFF8FAFC"
-        android:pathData="M64,64 L64,52 L59,52 L67,42 L75,52 L70,52 L70,64 Z" />
+        android:pathData="M43,42 L50,42 L64,54 L50,66 L43,66 L57,54 Z" />
 </vector>

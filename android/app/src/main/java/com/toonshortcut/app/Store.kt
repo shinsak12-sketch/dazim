@@ -5,12 +5,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+/** 다음 회차 확인 결과. 실패를 따로 두어야 화면에서 구분해 보여줄 수 있다. */
+enum class NextStatus { UNKNOWN, YES, NO, FAILED }
+
 data class Comic(
     val id: String,
     var title: String,
     var path: String,
-    /** 다음 회차가 나왔는지. 아직 확인하지 않았으면 null. */
-    var hasNext: Boolean? = null,
+    var next: NextStatus = NextStatus.UNKNOWN,
 )
 
 /**
@@ -65,9 +67,10 @@ class Store(context: Context) {
                     val id = o.optString("id", "")
                     val path = o.optString("path", "")
                     if (id.isEmpty() || path.isEmpty()) continue
-                    val hasNext =
-                        if (o.has("hasNext") && !o.isNull("hasNext")) o.optBoolean("hasNext") else null
-                    out.add(Comic(id, o.optString("title", "제목 없음"), path, hasNext))
+                    val next = runCatching {
+                        NextStatus.valueOf(o.optString("next", NextStatus.UNKNOWN.name))
+                    }.getOrDefault(NextStatus.UNKNOWN)
+                    out.add(Comic(id, o.optString("title", "제목 없음"), path, next))
                 }
                 out
             } catch (e: Exception) {
@@ -79,7 +82,7 @@ class Store(context: Context) {
             for (c in value) {
                 arr.put(
                     JSONObject().put("id", c.id).put("title", c.title).put("path", c.path)
-                        .put("hasNext", c.hasNext ?: JSONObject.NULL),
+                        .put("next", c.next.name),
                 )
             }
             prefs.edit().putString(KEY_COMICS, arr.toString()).apply()
@@ -113,14 +116,19 @@ class Store(context: Context) {
         val list = comics
         val c = list.firstOrNull { it.id == id } ?: return
         if (title != null) c.title = title
-        if (path != null) c.path = path
+        // 회차가 바뀌면 "다음 화가 있나"에 대한 이전 판정은 더 이상 맞지 않는다.
+        if (path != null && path != c.path) {
+            c.path = path
+            c.next = NextStatus.UNKNOWN
+        }
         comics = list
     }
 
-    fun setHasNext(id: String, hasNext: Boolean?) {
+    fun setNext(id: String, next: NextStatus) {
         val list = comics
         val c = list.firstOrNull { it.id == id } ?: return
-        c.hasNext = hasNext
+        if (c.next == next) return
+        c.next = next
         comics = list
     }
 

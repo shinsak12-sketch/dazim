@@ -3,7 +3,6 @@ package com.toonshortcut.app
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Bundle
 import android.text.InputType
@@ -23,6 +22,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var store: Store
     private lateinit var listContainer: LinearLayout
     private lateinit var domainView: TextView
+    private lateinit var subtitleView: TextView
     private lateinit var checkButton: TextView
     private var checking = false
 
@@ -44,7 +44,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // 뷰어에서 회차가 바뀌었을 수 있으니 돌아올 때마다 다시 그린다.
+        // 뷰어에서 회차나 확인 결과가 바뀌었을 수 있으니 돌아올 때마다 다시 그린다.
         render()
     }
 
@@ -56,204 +56,221 @@ class MainActivity : AppCompatActivity() {
         if (text.isNotEmpty()) showComicDialog(prefillUrl = text)
     }
 
-    // ------------------------------------------------------------------ 화면
+    // ------------------------------------------------------------------ 화면 뼈대
 
     private fun buildLayout(): View {
-        val scroll = ScrollView(this).apply { setBackgroundColor(Color.parseColor("#020617")) }
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(32))
+        val scroll = ScrollView(this).apply {
+            setBackgroundColor(Ui.BG)
+            isFillViewport = true
         }
+        val root = column().apply { setPadding(pad(20), pad(20), pad(20), pad(40)) }
 
         root.addView(TextView(this).apply {
             text = "만화 바로가기"
-            textSize = 20f
+            textSize = 24f
             setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#F1F5F9"))
+            setTextColor(Ui.TEXT)
+            letterSpacing = -0.02f
         })
-
-        root.addView(buildDomainCard())
-
-        checkButton = subtleButton("새 회차 확인") { checkNewEpisodes() }.apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) }
+        subtitleView = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Ui.TEXT_DIM)
+            setPadding(0, pad(2), 0, 0)
         }
-        root.addView(checkButton)
+        root.addView(subtitleView)
 
-        listContainer = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(16) }
-        }
-        root.addView(listContainer)
+        root.addView(buildDomainCard(), marginTop(18))
 
-        root.addView(primaryButton("+ 만화 추가") { showComicDialog() }.apply {
-            (layoutParams as LinearLayout.LayoutParams).topMargin = dp(16)
-        })
+        checkButton = softButton("새 회차 확인") { checkNewEpisodes() }
+        root.addView(checkButton, marginTop(10))
 
-        val backupRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) }
-        }
-        backupRow.addView(subtleButton("목록 내보내기") { exportList() }.apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        })
-        backupRow.addView(subtleButton("목록 가져오기") { showImportDialog() }.apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { leftMargin = dp(8) }
-        })
-        root.addView(backupRow)
+        listContainer = column()
+        root.addView(listContainer, marginTop(18))
+
+        root.addView(accentButton("만화 추가") { showComicDialog() }, marginTop(14))
+
+        val backupRow = row()
+        backupRow.addView(softButton("내보내기") { exportList() }, weightWithRightGap())
+        backupRow.addView(softButton("가져오기") { showImportDialog() }, weight())
+        root.addView(backupRow, marginTop(8))
 
         root.addView(TextView(this).apply {
-            text = "만화를 보다가 다음 화로 넘어가면 앱이 알아서 회차를 저장합니다.\n" +
-                "주소가 막히면 번호를 올려 자동으로 다시 시도합니다."
-            textSize = 11f
-            setTextColor(Color.parseColor("#475569"))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(20) }
-        })
+            text = "다음 화로 넘어가면 회차가 자동으로 저장됩니다.\n" +
+                "주소가 막히면 뷰어에서 주소 +1 을 눌러주세요."
+            textSize = 11.5f
+            setLineSpacing(pad(3).toFloat(), 1f)
+            setTextColor(Ui.TEXT_FAINT)
+        }, marginTop(24))
 
         scroll.addView(root)
         return scroll
     }
 
     private fun buildDomainCard(): View {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#0F172A"))
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(12) }
+        val card = column().apply {
+            background = Ui.rounded(Ui.SURFACE, 18, context, Ui.BORDER)
+            setPadding(pad(16), pad(14), pad(16), pad(16))
         }
 
         card.addView(TextView(this).apply {
             text = "현재 주소"
             textSize = 11f
-            setTextColor(Color.parseColor("#64748B"))
+            letterSpacing = 0.08f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Ui.TEXT_DIM)
         })
 
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { topMargin = dp(8) }
-        }
-
-        row.addView(bigButton("−") { store.bumpDomain(-1); render() })
+        val r = row().apply { gravity = Gravity.CENTER_VERTICAL }
+        r.addView(stepper("−") { store.bumpDomain(-1); render() })
 
         domainView = TextView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             gravity = Gravity.CENTER
-            textSize = 16f
-            setTypeface(Typeface.MONOSPACE)
-            setTextColor(Color.parseColor("#F1F5F9"))
-            isClickable = true
+            textSize = 17f
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            setTextColor(Ui.TEXT)
+            setPadding(pad(8), pad(12), pad(8), pad(12))
+            Ui.tappable(this, Ui.rounded(Ui.BG, 14, context, Ui.BORDER))
             setOnClickListener { showDomainDialog() }
         }
-        row.addView(domainView)
+        r.addView(domainView, LinearLayout.LayoutParams(0, wrap, 1f).apply {
+            leftMargin = pad(10); rightMargin = pad(10)
+        })
 
-        row.addView(bigButton("+") { store.bumpDomain(1); render() })
-        card.addView(row)
+        r.addView(stepper("+", accent = true) { store.bumpDomain(1); render() })
+        card.addView(r, marginTop(12))
+
+        card.addView(TextView(this).apply {
+            text = "주소를 눌러 직접 고칠 수 있습니다"
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setTextColor(Ui.TEXT_FAINT)
+        }, marginTop(10))
+
         return card
     }
+
+    // ------------------------------------------------------------------ 목록 그리기
 
     private fun render() {
         domainView.text = SiteUrl.buildHost(store.domain)
         listContainer.removeAllViews()
 
         val comics = store.comics
+        subtitleView.text = if (comics.isEmpty()) "저장한 만화 없음" else "만화 ${comics.size}편"
+
         if (comics.isEmpty()) {
-            listContainer.addView(TextView(this).apply {
-                text = "저장한 만화가 없습니다.\n보던 주소를 복사한 뒤 아래 [만화 추가]를 누르세요."
-                textSize = 13f
-                gravity = Gravity.CENTER
-                setTextColor(Color.parseColor("#64748B"))
-                setPadding(dp(16), dp(32), dp(16), dp(32))
-            })
+            listContainer.addView(emptyState())
             return
         }
+        for (c in comics) listContainer.addView(buildComicCard(c), marginTop(10))
+    }
 
-        for (c in comics) listContainer.addView(buildComicCard(c))
+    private fun emptyState(): View = column().apply {
+        background = Ui.rounded(Ui.SURFACE, 18, context, Ui.BORDER)
+        setPadding(pad(20), pad(36), pad(20), pad(36))
+        gravity = Gravity.CENTER
+        addView(TextView(this@MainActivity).apply {
+            text = "저장한 만화가 없습니다"
+            textSize = 15f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(Ui.TEXT_DIM)
+            gravity = Gravity.CENTER
+        })
+        addView(TextView(this@MainActivity).apply {
+            text = "보던 주소를 복사한 뒤\n아래 [만화 추가]를 누르세요"
+            textSize = 12.5f
+            gravity = Gravity.CENTER
+            setLineSpacing(pad(3).toFloat(), 1f)
+            setTextColor(Ui.TEXT_FAINT)
+            setPadding(0, pad(8), 0, 0)
+        })
     }
 
     private fun buildComicCard(c: Comic): View {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        val card = row().apply {
             gravity = Gravity.CENTER_VERTICAL
-            setBackgroundColor(Color.parseColor("#0F172A"))
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-            ).apply { bottomMargin = dp(8) }
-            isClickable = true
+            setPadding(pad(16), pad(14), pad(14), pad(14))
+            Ui.tappable(this, Ui.rounded(Ui.SURFACE, 18, context, Ui.BORDER))
             setOnClickListener { openReader(c) }
             setOnLongClickListener { showComicMenu(c); true }
         }
 
-        val texts = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-        }
+        val texts = column()
         texts.addView(TextView(this).apply {
             text = c.title
-            textSize = 15f
+            textSize = 16f
             maxLines = 1
             setTypeface(null, Typeface.BOLD)
-            setTextColor(Color.parseColor("#F1F5F9"))
+            setTextColor(Ui.TEXT)
         })
-        val line2 = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        line2.addView(TextView(this).apply {
+
+        val meta = row().apply { gravity = Gravity.CENTER_VERTICAL }
+        meta.addView(TextView(this).apply {
             text = SiteUrl.episodeLabel(c.path) ?: SiteUrl.decodeUri(c.path)
-            textSize = 12f
+            textSize = 12.5f
             maxLines = 1
-            setTextColor(Color.parseColor("#38BDF8"))
+            setTextColor(Ui.TEXT_DIM)
         })
+        statusBadge(c)?.let { meta.addView(it, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = pad(8) }) }
+        texts.addView(meta, marginTop(4))
 
-        val ep = SiteUrl.parseEpisode(c.path)?.ep
-        when (c.hasNext) {
-            true -> line2.addView(TextView(this).apply {
-                // 눌러서 바로 다음 화로 갈 수 있게 한다.
-                text = if (ep != null) "  새 회차 · ${ep + 1}화 보기" else "  새 회차"
-                textSize = 12f
-                setTypeface(null, Typeface.BOLD)
-                setTextColor(Color.parseColor("#34D399"))
-                isClickable = true
-                setPadding(dp(4), dp(2), dp(6), dp(2))
-                if (ep != null) setOnClickListener { openReader(c, ep + 1) }
-            })
-            false -> line2.addView(TextView(this).apply {
-                text = "  최신"
-                textSize = 12f
-                setTextColor(Color.parseColor("#64748B"))
-            })
-            null -> Unit // 아직 확인 안 함
-        }
-        texts.addView(line2)
-        card.addView(texts)
-
-        card.addView(TextView(this).apply {
-            text = "열기"
-            textSize = 14f
-            setTypeface(null, Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setTextColor(Color.parseColor("#020617"))
-            setBackgroundColor(Color.parseColor("#0EA5E9"))
-            setPadding(dp(16), dp(10), dp(16), dp(10))
-            isClickable = true
-            setOnClickListener { openReader(c) }
-        })
+        card.addView(texts, LinearLayout.LayoutParams(0, wrap, 1f))
+        card.addView(openButton(c), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = pad(10) })
         return card
     }
+
+    /**
+     * 확인 결과를 배지로 보여준다.
+     * 실패는 붉게 따로 표시한다. 안 나온 것과 확인이 안 된 것은 다른 상태이므로
+     * 하나로 뭉뚱그리면 사용자가 직접 들어가 봐야 하는지 알 수 없다.
+     */
+    private fun statusBadge(c: Comic): View? {
+        val ep = SiteUrl.parseEpisode(c.path)?.ep
+        return when (c.next) {
+            NextStatus.YES -> badge(
+                if (ep != null) "새 회차 · ${ep + 1}화" else "새 회차",
+                Ui.GREEN,
+            ) { if (ep != null) openReader(c, ep + 1) }
+
+            NextStatus.NO -> badge("최신", Ui.TEXT_FAINT, null)
+
+            NextStatus.FAILED -> badge("확인 실패", Ui.RED) {
+                Toast.makeText(this, "직접 열어보면 결과가 갱신됩니다.", Toast.LENGTH_SHORT).show()
+                openReader(c)
+            }
+
+            NextStatus.UNKNOWN -> null
+        }
+    }
+
+    private fun badge(text: String, color: Int, onClick: (() -> Unit)?): TextView =
+        TextView(this).apply {
+            this.text = text
+            textSize = 11.5f
+            setTypeface(null, Typeface.BOLD)
+            setTextColor(color)
+            setPadding(pad(9), pad(4), pad(9), pad(4))
+            val bg = Ui.pill(Ui.alpha(color, 38), context)
+            if (onClick != null) {
+                Ui.tappable(this, bg)
+                setOnClickListener { onClick() }
+            } else {
+                background = bg
+            }
+        }
+
+    private fun openButton(c: Comic): TextView = TextView(this).apply {
+        text = "열기"
+        textSize = 14f
+        gravity = Gravity.CENTER
+        setTypeface(null, Typeface.BOLD)
+        setTextColor(Ui.ON_ACCENT)
+        setPadding(pad(20), pad(11), pad(20), pad(11))
+        Ui.tappable(this, Ui.rounded(Ui.ACCENT, 14, context))
+        setOnClickListener { openReader(c) }
+    }
+
+    // ------------------------------------------------------------------ 동작
 
     private fun openReader(c: Comic, episode: Int? = null) {
         val intent = Intent(this, ReaderActivity::class.java)
@@ -272,26 +289,25 @@ class MainActivity : AppCompatActivity() {
         }
         checking = true
         var done = 0
-        val failed = mutableListOf<String>()
-        checkButton.text = "확인 중… (0/${comics.size})"
+        checkButton.isEnabled = false
+        checkButton.text = "확인 중… 0/${comics.size}"
 
         EpisodeCheck.checkAll(
             store.domain,
             comics,
             onEach = { r ->
                 done++
-                if (r.hasNext != null) store.setHasNext(r.comicId, r.hasNext)
-                else failed.add(comics.firstOrNull { it.id == r.comicId }?.title ?: "?")
-                checkButton.text = "확인 중… ($done/${comics.size})"
+                store.setNext(r.comicId, r.status)
+                checkButton.text = "확인 중… $done/${comics.size}"
                 render()
             },
             onDone = {
                 checking = false
+                checkButton.isEnabled = true
                 checkButton.text = "새 회차 확인"
                 render()
-                if (failed.isNotEmpty()) {
-                    toast("확인 실패: ${failed.joinToString(", ")}")
-                }
+                val failed = store.comics.count { it.next == NextStatus.FAILED }
+                if (failed > 0) toast("${failed}편은 확인하지 못했습니다. 직접 열어보면 갱신됩니다.")
             },
         )
     }
@@ -323,25 +339,17 @@ class MainActivity : AppCompatActivity() {
 
     /** 추가와 수정을 같은 창으로 처리한다. */
     private fun showComicDialog(existing: Comic? = null, prefillUrl: String? = null) {
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(0))
-        }
+        val box = column().apply { setPadding(pad(24), pad(12), pad(24), 0) }
 
         val urlInput = EditText(this).apply {
             hint = "https://tkor146.com/..."
             setSingleLine(false)
             maxLines = 4
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            setText(
-                prefillUrl
-                    ?: existing?.let { SiteUrl.decodeUri(it.path) }
-                    ?: clipboardUrl()
-                    ?: "",
-            )
+            setText(prefillUrl ?: existing?.let { SiteUrl.decodeUri(it.path) } ?: clipboardUrl() ?: "")
         }
         val titleInput = EditText(this).apply {
-            hint = "제목 (비우면 주소에서 자동)"
+            hint = "비우면 주소에서 자동"
             setSingleLine(true)
             setText(existing?.title ?: "")
         }
@@ -368,13 +376,10 @@ class MainActivity : AppCompatActivity() {
         }
         val title = rawTitle.trim().ifEmpty { SiteUrl.guessTitle(parsed.path) }
 
-        if (existing == null) {
-            store.addComic(title, parsed.path)
-        } else {
-            store.updateComic(existing.id, title = title, path = parsed.path)
-        }
+        if (existing == null) store.addComic(title, parsed.path)
+        else store.updateComic(existing.id, title = title, path = parsed.path)
 
-        // 붙여넣은 주소의 도메인 번호가 다르면 갱신할지 물어본다.
+        // 붙여넣은 주소의 도메인이 다르면 갱신할지 물어본다.
         val d = parsed.domain
         val cur = store.domain
         if (d != null && SiteUrl.sameShape(d, cur) && d.num != cur.num) {
@@ -394,29 +399,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDomainDialog() {
-        val d = store.domain
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(0))
-        }
         val input = EditText(this).apply {
             setSingleLine(true)
-            setText(SiteUrl.buildHost(d))
+            setText(SiteUrl.buildHost(store.domain))
         }
-        box.addView(label("주소 (번호 포함)"))
-        box.addView(input)
-
+        val box = column().apply {
+            setPadding(pad(24), pad(12), pad(24), 0)
+            addView(label("주소 (번호 포함)"))
+            addView(input)
+        }
         AlertDialog.Builder(this)
             .setTitle("현재 주소")
             .setView(box)
             .setPositiveButton("저장") { _, _ ->
                 val parsed = SiteUrl.parseHost(input.text.toString().trim())
-                if (parsed == null) {
-                    toast("숫자가 들어간 주소여야 합니다. 예: tkor146.com")
-                } else {
-                    store.domain = parsed
-                    render()
-                }
+                if (parsed == null) toast("숫자가 들어간 주소여야 합니다. 예: tkor146.com")
+                else { store.domain = parsed; render() }
             }
             .setNegativeButton("취소", null)
             .show()
@@ -425,12 +423,11 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 백업
 
     private fun exportList() {
-        val json = store.exportJson()
         startActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, json)
+                    putExtra(Intent.EXTRA_TEXT, store.exportJson())
                 },
                 "목록 보내기",
             ),
@@ -445,9 +442,8 @@ class MainActivity : AppCompatActivity() {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
             setText(clipboardText()?.takeIf { it.trimStart().startsWith("{") } ?: "")
         }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(12), dp(20), dp(0))
+        val box = column().apply {
+            setPadding(pad(24), pad(12), pad(24), 0)
             addView(input)
         }
         AlertDialog.Builder(this)
@@ -466,7 +462,68 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    // ------------------------------------------------------------------ 도우미
+    // ------------------------------------------------------------------ 뷰 도우미
+
+    private val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
+    private val match = ViewGroup.LayoutParams.MATCH_PARENT
+
+    private fun pad(v: Int) = Ui.dp(this, v)
+
+    private fun column() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        layoutParams = LinearLayout.LayoutParams(match, wrap)
+    }
+
+    private fun row() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        layoutParams = LinearLayout.LayoutParams(match, wrap)
+    }
+
+    private fun marginTop(v: Int) = LinearLayout.LayoutParams(match, wrap).apply { topMargin = pad(v) }
+    private fun weight() = LinearLayout.LayoutParams(0, wrap, 1f)
+    private fun weightWithRightGap() = LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = pad(8) }
+
+    private fun label(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 11f
+        setTypeface(null, Typeface.BOLD)
+        letterSpacing = 0.06f
+        setTextColor(Ui.TEXT_DIM)
+        setPadding(0, pad(12), 0, pad(2))
+    }
+
+    private fun accentButton(text: String, onClick: () -> Unit) = TextView(this).apply {
+        this.text = text
+        textSize = 15f
+        gravity = Gravity.CENTER
+        setTypeface(null, Typeface.BOLD)
+        setTextColor(Ui.ON_ACCENT)
+        setPadding(pad(16), pad(15), pad(16), pad(15))
+        Ui.tappable(this, Ui.rounded(Ui.ACCENT, 16, context))
+        setOnClickListener { onClick() }
+    }
+
+    private fun softButton(text: String, onClick: () -> Unit) = TextView(this).apply {
+        this.text = text
+        textSize = 13.5f
+        gravity = Gravity.CENTER
+        setTypeface(null, Typeface.BOLD)
+        setTextColor(Ui.TEXT)
+        setPadding(pad(14), pad(13), pad(14), pad(13))
+        Ui.tappable(this, Ui.rounded(Ui.SURFACE_HI, 14, context, Ui.BORDER))
+        setOnClickListener { onClick() }
+    }
+
+    private fun stepper(text: String, accent: Boolean = false, onClick: () -> Unit) = TextView(this).apply {
+        this.text = text
+        textSize = 22f
+        gravity = Gravity.CENTER
+        setTypeface(null, Typeface.BOLD)
+        setTextColor(if (accent) Ui.ON_ACCENT else Ui.TEXT)
+        Ui.tappable(this, Ui.rounded(if (accent) Ui.ACCENT else Ui.SURFACE_HI, 14, context, if (accent) null else Ui.BORDER))
+        layoutParams = LinearLayout.LayoutParams(pad(54), pad(50))
+        setOnClickListener { onClick() }
+    }
 
     private fun clipboardText(): String? {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
@@ -478,52 +535,5 @@ class MainActivity : AppCompatActivity() {
     private fun clipboardUrl(): String? =
         clipboardText()?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
 
-    private fun label(text: String) = TextView(this).apply {
-        this.text = text
-        textSize = 11f
-        setTextColor(Color.parseColor("#64748B"))
-        setPadding(0, dp(10), 0, 0)
-    }
-
-    private fun primaryButton(text: String, onClick: () -> Unit) = TextView(this).apply {
-        this.text = text
-        textSize = 15f
-        gravity = Gravity.CENTER
-        setTypeface(null, Typeface.BOLD)
-        setTextColor(Color.parseColor("#020617"))
-        setBackgroundColor(Color.parseColor("#0EA5E9"))
-        setPadding(dp(16), dp(14), dp(16), dp(14))
-        isClickable = true
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-        )
-        setOnClickListener { onClick() }
-    }
-
-    private fun subtleButton(text: String, onClick: () -> Unit) = TextView(this).apply {
-        this.text = text
-        textSize = 13f
-        gravity = Gravity.CENTER
-        setTextColor(Color.parseColor("#CBD5E1"))
-        setBackgroundColor(Color.parseColor("#1E293B"))
-        setPadding(dp(12), dp(12), dp(12), dp(12))
-        isClickable = true
-        setOnClickListener { onClick() }
-    }
-
-    private fun bigButton(text: String, onClick: () -> Unit) = TextView(this).apply {
-        this.text = text
-        textSize = 22f
-        gravity = Gravity.CENTER
-        setTypeface(null, Typeface.BOLD)
-        setTextColor(Color.parseColor("#F1F5F9"))
-        setBackgroundColor(Color.parseColor("#1E293B"))
-        isClickable = true
-        layoutParams = LinearLayout.LayoutParams(dp(56), dp(52))
-        setOnClickListener { onClick() }
-    }
-
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-
-    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 }

@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 object EpisodeCheck {
 
-    data class Result(val comicId: String, val hasNext: Boolean?, val error: String?)
+    data class Result(val comicId: String, val status: NextStatus, val error: String?)
 
     private const val TIMEOUT_MS = 12000
     private const val MAX_BYTES = 512 * 1024
@@ -48,7 +48,7 @@ object EpisodeCheck {
                 val result = try {
                     check(domain, c)
                 } catch (e: Exception) {
-                    Result(c.id, null, e.message ?: "확인 실패")
+                    Result(c.id, NextStatus.FAILED, e.message ?: "확인 실패")
                 }
                 main.post {
                     onEach(result)
@@ -60,14 +60,14 @@ object EpisodeCheck {
 
     private fun check(domain: SiteUrl.Domain, comic: Comic): Result {
         val ref = SiteUrl.parseEpisode(comic.path)
-            ?: return Result(comic.id, null, "회차 번호를 못 찾음")
+            ?: return Result(comic.id, NextStatus.FAILED, "회차 번호를 못 찾음")
         val next = ref.ep + 1
 
         // 1순위: 보던 페이지에 다음 화 링크가 있는지 (요청 한 번)
         val page = fetch(SiteUrl.buildUrl(domain, comic.path))
-            ?: return Result(comic.id, null, "사이트에 접속하지 못함")
+            ?: return Result(comic.id, NextStatus.FAILED, "사이트에 접속하지 못함")
         if (page.status == 200 && page.decodings().any { SiteUrl.linksToEpisode(it, ref, next) }) {
-            return Result(comic.id, true, null)
+            return Result(comic.id, NextStatus.YES, null)
         }
 
         // 2순위: 링크 형태가 다를 수 있으니 다음 화 주소를 직접 열어본다.
@@ -77,7 +77,7 @@ object EpisodeCheck {
             // 없는 회차에 404 대신 200을 주는 사이트가 있어 내용까지 확인한다.
             nextPage.decodings().any { SiteUrl.looksLikeEpisode(it, next) }
 
-        return Result(comic.id, exists, null)
+        return Result(comic.id, if (exists) NextStatus.YES else NextStatus.NO, null)
     }
 
     private class Page(val status: Int, val body: ByteArray, val contentType: String?) {
