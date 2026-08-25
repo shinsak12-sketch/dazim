@@ -74,7 +74,7 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(buildDomainCard())
 
-        checkButton = subtleButton("새 회차 확인") { checkLatest() }.apply {
+        checkButton = subtleButton("새 회차 확인") { checkNewEpisodes() }.apply {
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             ).apply { topMargin = dp(8) }
@@ -220,26 +220,23 @@ class MainActivity : AppCompatActivity() {
         })
 
         val ep = SiteUrl.parseEpisode(c.path)?.ep
-        val latest = c.latest
-        if (ep != null && latest != null) {
-            if (latest > ep) {
-                // 눌러서 바로 최신화로 갈 수 있게 한다.
-                line2.addView(TextView(this).apply {
-                    text = "  +${latest - ep} · ${latest}화 보기"
-                    textSize = 12f
-                    setTypeface(null, Typeface.BOLD)
-                    setTextColor(Color.parseColor("#34D399"))
-                    isClickable = true
-                    setPadding(dp(4), dp(2), dp(6), dp(2))
-                    setOnClickListener { openReader(c, latest) }
-                })
-            } else {
-                line2.addView(TextView(this).apply {
-                    text = "  최신"
-                    textSize = 12f
-                    setTextColor(Color.parseColor("#64748B"))
-                })
-            }
+        when (c.hasNext) {
+            true -> line2.addView(TextView(this).apply {
+                // 눌러서 바로 다음 화로 갈 수 있게 한다.
+                text = if (ep != null) "  새 회차 · ${ep + 1}화 보기" else "  새 회차"
+                textSize = 12f
+                setTypeface(null, Typeface.BOLD)
+                setTextColor(Color.parseColor("#34D399"))
+                isClickable = true
+                setPadding(dp(4), dp(2), dp(6), dp(2))
+                if (ep != null) setOnClickListener { openReader(c, ep + 1) }
+            })
+            false -> line2.addView(TextView(this).apply {
+                text = "  최신"
+                textSize = 12f
+                setTextColor(Color.parseColor("#64748B"))
+            })
+            null -> Unit // 아직 확인 안 함
         }
         texts.addView(line2)
         card.addView(texts)
@@ -265,8 +262,8 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
-    /** 저장된 만화들의 최신 회차를 한 번에 확인한다. 결과는 끝나는 대로 하나씩 반영된다. */
-    private fun checkLatest() {
+    /** 저장된 만화들에 다음 회차가 나왔는지 한 번에 확인한다. 결과는 끝나는 대로 하나씩 반영된다. */
+    private fun checkNewEpisodes() {
         if (checking) return
         val comics = store.comics
         if (comics.isEmpty()) {
@@ -283,7 +280,7 @@ class MainActivity : AppCompatActivity() {
             comics,
             onEach = { r ->
                 done++
-                if (r.latest != null) store.setLatest(r.comicId, r.latest)
+                if (r.hasNext != null) store.setHasNext(r.comicId, r.hasNext)
                 else failed.add(comics.firstOrNull { it.id == r.comicId }?.title ?: "?")
                 checkButton.text = "확인 중… ($done/${comics.size})"
                 render()

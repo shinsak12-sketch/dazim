@@ -9,8 +9,8 @@ data class Comic(
     val id: String,
     var title: String,
     var path: String,
-    /** 마지막으로 확인한 최신 회차. 확인 전이면 null. */
-    var latest: Int? = null,
+    /** 다음 회차가 나왔는지. 아직 확인하지 않았으면 null. */
+    var hasNext: Boolean? = null,
 )
 
 /**
@@ -65,8 +65,9 @@ class Store(context: Context) {
                     val id = o.optString("id", "")
                     val path = o.optString("path", "")
                     if (id.isEmpty() || path.isEmpty()) continue
-                    val latest = if (o.has("latest") && !o.isNull("latest")) o.optInt("latest") else null
-                    out.add(Comic(id, o.optString("title", "제목 없음"), path, latest))
+                    val hasNext =
+                        if (o.has("hasNext") && !o.isNull("hasNext")) o.optBoolean("hasNext") else null
+                    out.add(Comic(id, o.optString("title", "제목 없음"), path, hasNext))
                 }
                 out
             } catch (e: Exception) {
@@ -78,7 +79,7 @@ class Store(context: Context) {
             for (c in value) {
                 arr.put(
                     JSONObject().put("id", c.id).put("title", c.title).put("path", c.path)
-                        .put("latest", c.latest ?: JSONObject.NULL),
+                        .put("hasNext", c.hasNext ?: JSONObject.NULL),
                 )
             }
             prefs.edit().putString(KEY_COMICS, arr.toString()).apply()
@@ -116,10 +117,10 @@ class Store(context: Context) {
         comics = list
     }
 
-    fun setLatest(id: String, latest: Int?) {
+    fun setHasNext(id: String, hasNext: Boolean?) {
         val list = comics
         val c = list.firstOrNull { it.id == id } ?: return
-        c.latest = latest
+        c.hasNext = hasNext
         comics = list
     }
 

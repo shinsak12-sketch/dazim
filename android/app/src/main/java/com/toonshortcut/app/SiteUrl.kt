@@ -190,21 +190,27 @@ object SiteUrl {
         return s.ifEmpty { "제목 없음" }
     }
 
-    // ---------------------------------------------------------------- 최신 회차 읽기
+    // ---------------------------------------------------------------- 다음 회차 확인
 
     /**
-     * "신마대제 62화 (총62화)" 같은 문구에서 총 회차 수를 뽑는다.
+     * 페이지에 특정 회차로 가는 링크가 있는지 본다.
      *
-     * 이 사이트는 뷰어 하단에 총 회차를 적어둔다. 이 값을 읽으면 다음 회차가
-     * 나왔는지 알아보려고 회차를 하나씩 눌러볼 필요가 없다.
+     * 뷰어 하단의 오른쪽 화살표가 곧 다음 화 링크다. 그게 있으면 다음 화가 나온 것이다.
      *
-     * 여러 번 나오면 가장 큰 값을 쓴다. 목록과 뷰어에 중복으로 적히는 경우가 있어서다.
+     * "(총93화)" 같은 표기는 쓸 수 없다. 0화가 있는 작품은 개수와 회차 번호가
+     * 어긋나기 때문이다(92화가 마지막인데 총93화로 적힌다).
+     *
+     * href 가 절대경로인지 상대경로인지, 한글이 인코딩돼 있는지가 사이트마다
+     * 달라서 파일 이름만 가지고 찾는다. 인코딩된 형태와 그렇지 않은 형태를 모두 본다.
      */
-    fun parseTotalEpisodes(html: String): Int? =
-        Regex("총\\s*(\\d{1,5})\\s*화")
-            .findAll(html)
-            .mapNotNull { it.groupValues[1].toIntOrNull() }
-            .maxOrNull()
+    fun linksToEpisode(html: String, ref: Episode, ep: Int): Boolean {
+        val encoded = buildEpisodePath(ref, ep)
+        val encodedName = encoded.substringAfterLast('/')
+        val decodedName = decodeUri(encoded).substringAfterLast('/')
+        if (encodedName.isEmpty()) return false
+        // 퍼센트 인코딩은 대소문자가 섞여 나올 수 있다(%ED vs %ed).
+        return html.contains(encodedName, ignoreCase = true) || html.contains(decodedName)
+    }
 
     /**
      * 받아온 페이지가 정말 그 회차의 것인지 대충 확인한다.

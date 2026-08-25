@@ -9,22 +9,22 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * 저장된 만화들의 최신 회차를 확인한다.
+ * 저장된 만화에 다음 회차가 나왔는지 확인한다.
  *
- * 사이트가 뷰어에 "(총62화)" 처럼 총 회차를 적어두므로, 보고 있던 페이지를
- * 한 번만 받아서 그 숫자를 읽으면 된다. 만화 한 편당 요청 한 번으로 끝난다.
+ * 보고 있던 페이지를 받아서 "다음 화로 가는 링크"가 있는지만 본다.
+ * 뷰어 하단의 오른쪽 화살표가 곧 그 링크다.
  *
- * 그 문구를 못 찾으면(자바스크립트로 그리는 경우 등) 다음 회차들이 실제로
- * 열리는지 하나씩 확인하는 방식으로 넘어간다. 느리지만 확실하다.
+ * "(총93화)" 같은 개수 표기는 쓰지 않는다. 0화가 있는 작품은 개수와 회차
+ * 번호가 어긋나서(92화가 마지막인데 총93화) 잘못된 답이 나온다.
+ *
+ * 링크를 못 찾으면 다음 회차 주소를 직접 열어보는 것으로 한 번 더 확인한다.
  */
 object EpisodeCheck {
 
-    data class Result(val comicId: String, val latest: Int?, val error: String?)
+    data class Result(val comicId: String, val hasNext: Boolean?, val error: String?)
 
     private const val TIMEOUT_MS = 12000
     private const val MAX_BYTES = 512 * 1024
-    /** 총 회차를 못 읽었을 때 앞으로 몇 화까지 직접 열어볼지 */
-    private const val MAX_PROBE = 10
     private const val UA =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
@@ -61,31 +61,23 @@ object EpisodeCheck {
     private fun check(domain: SiteUrl.Domain, comic: Comic): Result {
         val ref = SiteUrl.parseEpisode(comic.path)
             ?: return Result(comic.id, null, "회차 번호를 못 찾음")
+        val next = ref.ep + 1
 
-        // 1순위: 보던 페이지에서 "총 N화" 읽기 (요청 한 번)
+        // 1순위: 보던 페이지에 다음 화 링크가 있는지 (요청 한 번)
         val page = fetch(SiteUrl.buildUrl(domain, comic.path))
-        if (page != null && page.status == 200) {
-            for (text in page.decodings()) {
-                val total = SiteUrl.parseTotalEpisodes(text)
-                if (total != null && total >= ref.ep) return Result(comic.id, total, null)
-            }
+            ?: return Result(comic.id, null, "사이트에 접속하지 못함")
+        if (page.status == 200 && page.decodings().any { SiteUrl.linksToEpisode(it, ref, next) }) {
+            return Result(comic.id, true, null)
         }
 
-        // 2순위: 다음 회차들이 실제로 열리는지 확인
-        var latest = ref.ep
-        for (i in 1..MAX_PROBE) {
-            val ep = ref.ep + i
-            val next = fetch(SiteUrl.buildUrl(domain, SiteUrl.buildEpisodePath(ref, ep))) ?: break
-            if (next.status != 200) break
-            // 없는 회차에 200을 주는 사이트가 있어 내용까지 확인한다.
-            if (next.decodings().none { SiteUrl.looksLikeEpisode(it, ep) }) break
-            latest = ep
-        }
+        // 2순위: 링크 형태가 다를 수 있으니 다음 화 주소를 직접 열어본다.
+        val nextPage = fetch(SiteUrl.buildUrl(domain, SiteUrl.buildEpisodePath(ref, next)))
+        val exists = nextPage != null &&
+            nextPage.status == 200 &&
+            // 없는 회차에 404 대신 200을 주는 사이트가 있어 내용까지 확인한다.
+            nextPage.decodings().any { SiteUrl.looksLikeEpisode(it, next) }
 
-        if (latest == ref.ep && page == null) {
-            return Result(comic.id, null, "사이트에 접속하지 못함")
-        }
-        return Result(comic.id, latest, null)
+        return Result(comic.id, exists, null)
     }
 
     private class Page(val status: Int, val body: ByteArray, val contentType: String?) {
