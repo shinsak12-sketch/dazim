@@ -32,13 +32,37 @@ class Store(context: Context) {
     companion object {
         private const val KEY_DOMAIN = "domain"
         private const val KEY_COMICS = "comics"
-        private const val KEY_AUTO_SAVE = "auto_save_episode"
-        private val DEFAULT_DOMAIN = SiteUrl.Domain(head = "", prefix = "tkor", suffix = "com", pad = 3, num = 146)
+        private const val KEY_COMICS_2 = "comics2"
+
+        /**
+         * 지금 보고 있는 목록 (1 또는 2).
+         *
+         * 일부러 저장하지 않는다. 앱을 다시 켜면 항상 1번으로 돌아와야
+         * 숨긴 목록이 그대로 떠 있는 일이 없다. 화면끼리 값을 공유해야 하므로
+         * 인스턴스가 아니라 여기에 둔다.
+         */
+        @Volatile
+        var activeList: Int = 1
+
+        fun toggleList(): Int {
+            activeList = if (activeList == 1) 2 else 1
+            return activeList
+        }
     }
+
+    private val comicsKey: String
+        get() = if (activeList == 1) KEY_COMICS else KEY_COMICS_2
+
+    private object Keys {
+        const val AUTO_SAVE = "auto_save_episode"
+    }
+
+    private val defaultDomain =
+        SiteUrl.Domain(head = "", prefix = "tkor", suffix = "com", pad = 3, num = 146)
 
     var domain: SiteUrl.Domain
         get() {
-            val raw = prefs.getString(KEY_DOMAIN, null) ?: return DEFAULT_DOMAIN
+            val raw = prefs.getString(KEY_DOMAIN, null) ?: return defaultDomain
             return try {
                 val o = JSONObject(raw)
                 SiteUrl.Domain(
@@ -49,7 +73,7 @@ class Store(context: Context) {
                     num = SiteUrl.clampNum(o.optInt("num", 146)),
                 )
             } catch (e: Exception) {
-                DEFAULT_DOMAIN
+                defaultDomain
             }
         }
         set(value) {
@@ -64,7 +88,7 @@ class Store(context: Context) {
 
     var comics: MutableList<Comic>
         get() {
-            val raw = prefs.getString(KEY_COMICS, null) ?: return mutableListOf()
+            val raw = prefs.getString(comicsKey, null) ?: return mutableListOf()
             return try {
                 val arr = JSONArray(raw)
                 val out = mutableListOf<Comic>()
@@ -93,13 +117,13 @@ class Store(context: Context) {
                         .put("nextNote", c.nextNote ?: ""),
                 )
             }
-            prefs.edit().putString(KEY_COMICS, arr.toString()).apply()
+            prefs.edit().putString(comicsKey, arr.toString()).apply()
         }
 
     /** 회차 자동 저장 사용 여부. 끄면 상단 [저장] 버튼으로만 저장된다. */
     var autoSaveEpisode: Boolean
-        get() = prefs.getBoolean(KEY_AUTO_SAVE, true)
-        set(value) = prefs.edit().putBoolean(KEY_AUTO_SAVE, value).apply()
+        get() = prefs.getBoolean(Keys.AUTO_SAVE, true)
+        set(value) = prefs.edit().putBoolean(Keys.AUTO_SAVE, value).apply()
 
     fun bumpDomain(delta: Int): SiteUrl.Domain {
         val d = domain

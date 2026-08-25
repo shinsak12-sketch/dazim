@@ -12,8 +12,8 @@ android {
         // 어댑티브 아이콘만 쓰기 위해 26 이상. 안드로이드 8.0(2017) 이후 전부 해당된다.
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.7"
+        versionCode = 9
+        versionName = "1.8"
     }
 
     // 앱을 새로 빌드해도 서명이 같아야 "덮어쓰기 설치"가 된다.
@@ -49,4 +49,5 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 }

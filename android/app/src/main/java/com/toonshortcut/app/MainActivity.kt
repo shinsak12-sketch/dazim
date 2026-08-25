@@ -65,13 +65,22 @@ class MainActivity : AppCompatActivity() {
         }
         val root = column().apply { setPadding(pad(20), pad(20), pad(20), pad(40)) }
 
-        root.addView(TextView(this).apply {
+        val titleRow = row().apply { gravity = Gravity.CENTER_VERTICAL }
+        titleRow.addView(TextView(this).apply {
             text = "만화 바로가기"
             textSize = 24f
             setTypeface(null, Typeface.BOLD)
             setTextColor(Ui.TEXT)
             letterSpacing = -0.02f
-        })
+        }, LinearLayout.LayoutParams(0, wrap, 1f))
+
+        // 목록을 바꾸는 버튼. 배경도 글자도 물결 효과도 주지 않아 눈에 띄지 않는다.
+        // 어떤 목록을 보고 있는지는 목록 내용으로만 알 수 있다.
+        titleRow.addView(
+            View(this).apply { setOnClickListener { Store.toggleList(); render() } },
+            LinearLayout.LayoutParams(pad(56), pad(44)),
+        )
+        root.addView(titleRow)
         subtitleView = TextView(this).apply {
             textSize = 13f
             setTextColor(Ui.TEXT_DIM)

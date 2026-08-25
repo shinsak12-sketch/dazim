@@ -24,6 +24,7 @@ import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import org.json.JSONObject
 
 /**
@@ -43,6 +44,7 @@ class ReaderActivity : AppCompatActivity() {
 
     private lateinit var store: Store
     private lateinit var web: WebView
+    private lateinit var swipe: SwipeRefreshLayout
     private lateinit var titleView: TextView
     private lateinit var hostView: TextView
     private lateinit var progress: ProgressBar
@@ -79,7 +81,24 @@ class ReaderActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Ui.BG)
         }
-        root.addView(buildToolbar())
+
+        // 조작은 전부 아래에 둔다. 한 손으로 들었을 때 엄지가 닿는 곳이다.
+        web = WebView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            setBackgroundColor(Color.WHITE)
+        }
+        swipe = SwipeRefreshLayout(this).apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
+            setColorSchemeColors(Ui.ACCENT)
+            setProgressBackgroundColorSchemeColor(Ui.SURFACE)
+            // 맨 위에서 아래로 당기면 새로고침. 브라우저와 같은 동작이다.
+            setOnRefreshListener { load() }
+            addView(web)
+        }
+        root.addView(swipe)
+
         root.addView(buildErrorBar())
 
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
@@ -90,11 +109,7 @@ class ReaderActivity : AppCompatActivity() {
         }
         root.addView(progress)
 
-        web = WebView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
-            setBackgroundColor(Color.WHITE)
-        }
-        root.addView(web)
+        root.addView(buildBottomBar())
 
         setContentView(root)
         root.padForSystemBars()
@@ -112,7 +127,7 @@ class ReaderActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ 상단 바
 
-    private fun buildToolbar(): View {
+    private fun buildBottomBar(): View {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -120,8 +135,7 @@ class ReaderActivity : AppCompatActivity() {
             setPadding(dp(10), dp(8), dp(10), dp(8))
         }
 
-        // 사이트 자체에 이전/다음 버튼이 있으므로 앱에는 목록으로 나가는 길만 둔다.
-        bar.addView(softButton("목록") { finish() })
+        bar.addView(softButton("☰") { showMenu() })
 
         val texts = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -145,9 +159,9 @@ class ReaderActivity : AppCompatActivity() {
         texts.addView(hostView)
         bar.addView(texts)
 
-        bar.addView(accentButton("저장") { saveCurrent() })
-        bar.addWithGap(softButton("+1") { bumpDomain(1) }, dp(6))
-        bar.addWithGap(softButton("⋮") { showMenu() }, dp(6))
+        bar.addView(softButton("+1") { bumpDomain(1) })
+        bar.addWithGap(accentButton("저장") { saveCurrent() }, dp(6))
+        bar.addWithGap(softButton("목록") { finish() }, dp(6))
         return bar
     }
 
@@ -423,6 +437,7 @@ class ReaderActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                swipe.isRefreshing = false
                 if (url != null) autoSaveEpisode(url)
                 refreshTitle()
                 refreshNextFromPage()
@@ -436,6 +451,7 @@ class ReaderActivity : AppCompatActivity() {
                 super.onReceivedError(view, request, error)
                 // 이미지 같은 부수 요청 실패는 무시한다.
                 if (request?.isForMainFrame != true) return
+                swipe.isRefreshing = false
                 showError()
             }
         }
