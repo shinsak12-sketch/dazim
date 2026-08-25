@@ -16,6 +16,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivity : AppCompatActivity() {
 
@@ -24,7 +25,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var domainView: TextView
     private lateinit var subtitleView: TextView
     private lateinit var checkButton: TextView
+    private lateinit var swipe: SwipeRefreshLayout
     private var checking = false
+
+    /**
+     * 새 회차가 있는 것부터 보여줄지 여부.
+     *
+     * 저장된 순서를 실제로 바꾸지 않고 보여줄 때만 다시 늘어놓는다.
+     * 직접 맞춰둔 순서가 새로고침 한 번에 사라지면 안 되기 때문이다.
+     * 그래서 앱을 다시 켜면 원래 순서로 돌아온다.
+     */
+    private var sortByNew = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,6 +74,13 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(Ui.BG)
             isFillViewport = true
         }
+        swipe = SwipeRefreshLayout(this).apply {
+            setBackgroundColor(Ui.BG)
+            setColorSchemeColors(Ui.ACCENT)
+            setProgressBackgroundColorSchemeColor(Ui.SURFACE)
+            // 맨 위에서 아래로 당기면 확인하고, 새 회차가 있는 것부터 보여준다.
+            setOnRefreshListener { checkNewEpisodes(sortAfter = true) }
+        }
         val root = column().apply { setPadding(pad(20), pad(20), pad(20), pad(40)) }
 
         val titleRow = row().apply { gravity = Gravity.CENTER_VERTICAL }
@@ -90,18 +108,19 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(buildDomainCard(), marginTop(18))
 
+        val actionRow = row()
         checkButton = softButton("새 회차 확인") { checkNewEpisodes() }
-        root.addView(checkButton, marginTop(10))
+        actionRow.addView(checkButton, weightWithRightGap())
+        actionRow.addView(accentButton("만화 추가") { showComicDialog() }, weight())
+        root.addView(actionRow, marginTop(10))
 
         listContainer = column()
         root.addView(listContainer, marginTop(18))
 
-        root.addView(accentButton("만화 추가") { showComicDialog() }, marginTop(14))
-
         val backupRow = row()
         backupRow.addView(softButton("내보내기") { exportList() }, weightWithRightGap())
         backupRow.addView(softButton("가져오기") { showImportDialog() }, weight())
-        root.addView(backupRow, marginTop(8))
+        root.addView(backupRow, marginTop(14))
 
         root.addView(TextView(this).apply {
             text = "다음 화로 넘어가면 회차가 자동으로 저장됩니다.\n" +
@@ -112,7 +131,8 @@ class MainActivity : AppCompatActivity() {
         }, marginTop(24))
 
         scroll.addView(root)
-        return scroll
+        swipe.addView(scroll)
+        return swipe
     }
 
     private fun buildDomainCard(): View {
@@ -164,7 +184,8 @@ class MainActivity : AppCompatActivity() {
         domainView.text = SiteUrl.buildHost(store.domain)
         listContainer.removeAllViews()
 
-        val comics = store.comics
+        val stored = store.comics
+        val comics = if (sortByNew) stored.sortedBy { rankFor(it.next) } else stored
         subtitleView.text = if (comics.isEmpty()) "저장한 만화 없음" else "만화 ${comics.size}편"
 
         if (comics.isEmpty()) {
@@ -172,6 +193,15 @@ class MainActivity : AppCompatActivity() {
             return
         }
         for (c in comics) listContainer.addView(buildComicCard(c), marginTop(10))
+    }
+
+    /** 새 회차가 있는 것이 위로, 이미 최신인 것이 아래로 간다. */
+    private fun rankFor(status: NextStatus): Int = when (status) {
+        NextStatus.YES -> 0
+        NextStatus.FAILED -> 1
+        NextStatus.NO_EPISODE -> 2
+        NextStatus.UNKNOWN -> 3
+        NextStatus.NO -> 4
     }
 
     private fun emptyState(): View = column().apply {
@@ -317,10 +347,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 저장된 만화들에 다음 회차가 나왔는지 한 번에 확인한다. 결과는 끝나는 대로 하나씩 반영된다. */
-    private fun checkNewEpisodes() {
-        if (checking) return
+    private fun checkNewEpisodes(sortAfter: Boolean = false) {
+        if (checking) {
+            swipe.isRefreshing = false
+            return
+        }
         val comics = store.comics
         if (comics.isEmpty()) {
+            swipe.isRefreshing = false
             toast("저장한 만화가 없습니다.")
             return
         }
@@ -342,6 +376,8 @@ class MainActivity : AppCompatActivity() {
                 checking = false
                 checkButton.isEnabled = true
                 checkButton.text = "새 회차 확인"
+                swipe.isRefreshing = false
+                if (sortAfter) sortByNew = true
                 render()
                 val list = store.comics
                 val failed = list.count { it.next == NextStatus.FAILED }
@@ -364,8 +400,8 @@ class MainActivity : AppCompatActivity() {
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> showComicDialog(existing = c)
-                    1 -> { store.move(c.id, -1); render() }
-                    2 -> { store.move(c.id, 1); render() }
+                    1 -> { sortByNew = false; store.move(c.id, -1); render() }
+                    2 -> { sortByNew = false; store.move(c.id, 1); render() }
                     3 -> confirmDelete(c)
                 }
             }
