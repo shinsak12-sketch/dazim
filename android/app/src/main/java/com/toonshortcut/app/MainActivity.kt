@@ -23,6 +23,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var store: Store
     private lateinit var listContainer: LinearLayout
     private lateinit var domainView: TextView
+    private lateinit var checkButton: TextView
+    private var checking = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,6 +73,13 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(buildDomainCard())
+
+        checkButton = subtleButton("새 회차 확인") { checkLatest() }.apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(8) }
+        }
+        root.addView(checkButton)
 
         listContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -199,12 +208,40 @@ class MainActivity : AppCompatActivity() {
             setTypeface(null, Typeface.BOLD)
             setTextColor(Color.parseColor("#F1F5F9"))
         })
-        texts.addView(TextView(this).apply {
+        val line2 = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        line2.addView(TextView(this).apply {
             text = SiteUrl.episodeLabel(c.path) ?: SiteUrl.decodeUri(c.path)
             textSize = 12f
             maxLines = 1
             setTextColor(Color.parseColor("#38BDF8"))
         })
+
+        val ep = SiteUrl.parseEpisode(c.path)?.ep
+        val latest = c.latest
+        if (ep != null && latest != null) {
+            if (latest > ep) {
+                // 눌러서 바로 최신화로 갈 수 있게 한다.
+                line2.addView(TextView(this).apply {
+                    text = "  +${latest - ep} · ${latest}화 보기"
+                    textSize = 12f
+                    setTypeface(null, Typeface.BOLD)
+                    setTextColor(Color.parseColor("#34D399"))
+                    isClickable = true
+                    setPadding(dp(4), dp(2), dp(6), dp(2))
+                    setOnClickListener { openReader(c, latest) }
+                })
+            } else {
+                line2.addView(TextView(this).apply {
+                    text = "  최신"
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#64748B"))
+                })
+            }
+        }
+        texts.addView(line2)
         card.addView(texts)
 
         card.addView(TextView(this).apply {
@@ -221,9 +258,44 @@ class MainActivity : AppCompatActivity() {
         return card
     }
 
-    private fun openReader(c: Comic) {
-        startActivity(
-            Intent(this, ReaderActivity::class.java).putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id),
+    private fun openReader(c: Comic, episode: Int? = null) {
+        val intent = Intent(this, ReaderActivity::class.java)
+            .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id)
+        if (episode != null) intent.putExtra(ReaderActivity.EXTRA_EPISODE, episode)
+        startActivity(intent)
+    }
+
+    /** 저장된 만화들의 최신 회차를 한 번에 확인한다. 결과는 끝나는 대로 하나씩 반영된다. */
+    private fun checkLatest() {
+        if (checking) return
+        val comics = store.comics
+        if (comics.isEmpty()) {
+            toast("저장한 만화가 없습니다.")
+            return
+        }
+        checking = true
+        var done = 0
+        val failed = mutableListOf<String>()
+        checkButton.text = "확인 중… (0/${comics.size})"
+
+        EpisodeCheck.checkAll(
+            store.domain,
+            comics,
+            onEach = { r ->
+                done++
+                if (r.latest != null) store.setLatest(r.comicId, r.latest)
+                else failed.add(comics.firstOrNull { it.id == r.comicId }?.title ?: "?")
+                checkButton.text = "확인 중… ($done/${comics.size})"
+                render()
+            },
+            onDone = {
+                checking = false
+                checkButton.text = "새 회차 확인"
+                render()
+                if (failed.isNotEmpty()) {
+                    toast("확인 실패: ${failed.joinToString(", ")}")
+                }
+            },
         )
     }
 

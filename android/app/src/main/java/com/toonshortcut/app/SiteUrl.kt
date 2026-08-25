@@ -189,4 +189,29 @@ object SiteUrl {
         s = s.replace(Regex("\\s*\\d+\\s*화\\s*$"), "").trim()
         return s.ifEmpty { "제목 없음" }
     }
+
+    // ---------------------------------------------------------------- 최신 회차 읽기
+
+    /**
+     * "신마대제 62화 (총62화)" 같은 문구에서 총 회차 수를 뽑는다.
+     *
+     * 이 사이트는 뷰어 하단에 총 회차를 적어둔다. 이 값을 읽으면 다음 회차가
+     * 나왔는지 알아보려고 회차를 하나씩 눌러볼 필요가 없다.
+     *
+     * 여러 번 나오면 가장 큰 값을 쓴다. 목록과 뷰어에 중복으로 적히는 경우가 있어서다.
+     */
+    fun parseTotalEpisodes(html: String): Int? =
+        Regex("총\\s*(\\d{1,5})\\s*화")
+            .findAll(html)
+            .mapNotNull { it.groupValues[1].toIntOrNull() }
+            .maxOrNull()
+
+    /**
+     * 받아온 페이지가 정말 그 회차의 것인지 대충 확인한다.
+     *
+     * 없는 회차에 404 대신 200과 함께 안내 페이지를 주는 사이트가 있어서,
+     * 상태 코드만 믿으면 있지도 않은 회차를 있다고 세게 된다.
+     */
+    fun looksLikeEpisode(html: String, ep: Int): Boolean =
+        Regex("(?<!\\d)$ep\\s*화").containsMatchIn(html)
 }

@@ -36,6 +36,8 @@ class ReaderActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_COMIC_ID = "comic_id"
+        /** 목록에서 "최신화 보기"로 들어올 때 건너뛸 회차 */
+        const val EXTRA_EPISODE = "episode"
     }
 
     private lateinit var store: Store
@@ -60,6 +62,16 @@ class ReaderActivity : AppCompatActivity() {
             Toast.makeText(this, "만화를 찾을 수 없습니다.", Toast.LENGTH_SHORT).show()
             finish()
             return
+        }
+
+        // 목록에서 최신화로 바로 들어온 경우 그 회차부터 연다.
+        val jumpTo = intent.getIntExtra(EXTRA_EPISODE, -1)
+        if (jumpTo > 0) {
+            val c = comic
+            val ref = c?.let { SiteUrl.parseEpisode(it.path) }
+            if (ref != null && ref.ep != jumpTo) {
+                store.updateComic(comicId, path = SiteUrl.buildEpisodePath(ref, jumpTo))
+            }
         }
 
         val root = LinearLayout(this).apply {

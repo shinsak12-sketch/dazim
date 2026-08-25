@@ -5,7 +5,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-data class Comic(val id: String, var title: String, var path: String)
+data class Comic(
+    val id: String,
+    var title: String,
+    var path: String,
+    /** 마지막으로 확인한 최신 회차. 확인 전이면 null. */
+    var latest: Int? = null,
+)
 
 /**
  * 폰 안에만 저장한다. 서버도 DB도 쓰지 않는다.
@@ -59,7 +65,8 @@ class Store(context: Context) {
                     val id = o.optString("id", "")
                     val path = o.optString("path", "")
                     if (id.isEmpty() || path.isEmpty()) continue
-                    out.add(Comic(id, o.optString("title", "제목 없음"), path))
+                    val latest = if (o.has("latest") && !o.isNull("latest")) o.optInt("latest") else null
+                    out.add(Comic(id, o.optString("title", "제목 없음"), path, latest))
                 }
                 out
             } catch (e: Exception) {
@@ -69,7 +76,10 @@ class Store(context: Context) {
         set(value) {
             val arr = JSONArray()
             for (c in value) {
-                arr.put(JSONObject().put("id", c.id).put("title", c.title).put("path", c.path))
+                arr.put(
+                    JSONObject().put("id", c.id).put("title", c.title).put("path", c.path)
+                        .put("latest", c.latest ?: JSONObject.NULL),
+                )
             }
             prefs.edit().putString(KEY_COMICS, arr.toString()).apply()
         }
@@ -103,6 +113,13 @@ class Store(context: Context) {
         val c = list.firstOrNull { it.id == id } ?: return
         if (title != null) c.title = title
         if (path != null) c.path = path
+        comics = list
+    }
+
+    fun setLatest(id: String, latest: Int?) {
+        val list = comics
+        val c = list.firstOrNull { it.id == id } ?: return
+        c.latest = latest
         comics = list
     }
 

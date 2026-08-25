@@ -1,0 +1,145 @@
+package com.toonshortcut.app
+
+import android.os.Handler
+import android.os.Looper
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * 저장된 만화들의 최신 회차를 확인한다.
+ *
+ * 사이트가 뷰어에 "(총62화)" 처럼 총 회차를 적어두므로, 보고 있던 페이지를
+ * 한 번만 받아서 그 숫자를 읽으면 된다. 만화 한 편당 요청 한 번으로 끝난다.
+ *
+ * 그 문구를 못 찾으면(자바스크립트로 그리는 경우 등) 다음 회차들이 실제로
+ * 열리는지 하나씩 확인하는 방식으로 넘어간다. 느리지만 확실하다.
+ */
+object EpisodeCheck {
+
+    data class Result(val comicId: String, val latest: Int?, val error: String?)
+
+    private const val TIMEOUT_MS = 12000
+    private const val MAX_BYTES = 512 * 1024
+    /** 총 회차를 못 읽었을 때 앞으로 몇 화까지 직접 열어볼지 */
+    private const val MAX_PROBE = 10
+    private const val UA =
+        "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+
+    private val pool = Executors.newFixedThreadPool(3)
+    private val main = Handler(Looper.getMainLooper())
+
+    /** 결과는 확인이 끝나는 대로 하나씩 onEach 로 돌려준다. 전부 끝나면 onDone. */
+    fun checkAll(
+        domain: SiteUrl.Domain,
+        comics: List<Comic>,
+        onEach: (Result) -> Unit,
+        onDone: () -> Unit,
+    ) {
+        if (comics.isEmpty()) {
+            onDone()
+            return
+        }
+        val remaining = AtomicInteger(comics.size)
+        for (c in comics) {
+            pool.execute {
+                val result = try {
+                    check(domain, c)
+                } catch (e: Exception) {
+                    Result(c.id, null, e.message ?: "확인 실패")
+                }
+                main.post {
+                    onEach(result)
+                    if (remaining.decrementAndGet() == 0) onDone()
+                }
+            }
+        }
+    }
+
+    private fun check(domain: SiteUrl.Domain, comic: Comic): Result {
+        val ref = SiteUrl.parseEpisode(comic.path)
+            ?: return Result(comic.id, null, "회차 번호를 못 찾음")
+
+        // 1순위: 보던 페이지에서 "총 N화" 읽기 (요청 한 번)
+        val page = fetch(SiteUrl.buildUrl(domain, comic.path))
+        if (page != null && page.status == 200) {
+            for (text in page.decodings()) {
+                val total = SiteUrl.parseTotalEpisodes(text)
+                if (total != null && total >= ref.ep) return Result(comic.id, total, null)
+            }
+        }
+
+        // 2순위: 다음 회차들이 실제로 열리는지 확인
+        var latest = ref.ep
+        for (i in 1..MAX_PROBE) {
+            val ep = ref.ep + i
+            val next = fetch(SiteUrl.buildUrl(domain, SiteUrl.buildEpisodePath(ref, ep))) ?: break
+            if (next.status != 200) break
+            // 없는 회차에 200을 주는 사이트가 있어 내용까지 확인한다.
+            if (next.decodings().none { SiteUrl.looksLikeEpisode(it, ep) }) break
+            latest = ep
+        }
+
+        if (latest == ref.ep && page == null) {
+            return Result(comic.id, null, "사이트에 접속하지 못함")
+        }
+        return Result(comic.id, latest, null)
+    }
+
+    private class Page(val status: Int, val body: ByteArray, val contentType: String?) {
+        /**
+         * 한국 사이트는 UTF-8 과 EUC-KR 이 섞여 있고 헤더가 틀린 경우도 있다.
+         * 후보를 여러 개 만들어 그중 하나에서라도 원하는 문구가 잡히면 쓴다.
+         */
+        fun decodings(): List<String> {
+            val list = mutableListOf<String>()
+            charsetOf(contentType)?.let { runCatching { list.add(String(body, it)) } }
+            runCatching { list.add(String(body, Charsets.UTF_8)) }
+            runCatching { list.add(String(body, charset("EUC-KR"))) }
+            return list.distinct()
+        }
+    }
+
+    private fun charsetOf(contentType: String?): java.nio.charset.Charset? {
+        val name = contentType?.substringAfter("charset=", "")?.trim()?.trim('"')
+        if (name.isNullOrEmpty()) return null
+        return runCatching { charset(name) }.getOrNull()
+    }
+
+    private fun fetch(url: String): Page? {
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = TIMEOUT_MS
+                readTimeout = TIMEOUT_MS
+                instanceFollowRedirects = true
+                setRequestProperty("User-Agent", UA)
+                setRequestProperty("Accept", "text/html,application/xhtml+xml")
+            }
+            val status = conn.responseCode
+            val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.use { read(it) } ?: ByteArray(0)
+            Page(status, body, conn.contentType)
+        } catch (e: Exception) {
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    private fun read(input: java.io.InputStream): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(8192)
+        var total = 0
+        while (total < MAX_BYTES) {
+            val n = input.read(buf)
+            if (n <= 0) break
+            out.write(buf, 0, n)
+            total += n
+        }
+        return out.toByteArray()
+    }
+}
