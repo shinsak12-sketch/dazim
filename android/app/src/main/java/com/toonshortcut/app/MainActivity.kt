@@ -221,8 +221,9 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 확인 결과를 배지로 보여준다.
-     * 실패는 붉게 따로 표시한다. 안 나온 것과 확인이 안 된 것은 다른 상태이므로
-     * 하나로 뭉뚱그리면 사용자가 직접 들어가 봐야 하는지 알 수 없다.
+     *
+     * 실패와 "회차 번호 없는 주소"를 나눈다. 전자는 다시 시도하거나 열어보면 되고,
+     * 후자는 주소를 고쳐야 해서 사용자가 할 일이 다르다.
      */
     private fun statusBadge(c: Comic): View? {
         val ep = SiteUrl.parseEpisode(c.path)?.ep
@@ -234,13 +235,40 @@ class MainActivity : AppCompatActivity() {
 
             NextStatus.NO -> badge("최신", Ui.TEXT_FAINT, null)
 
-            NextStatus.FAILED -> badge("확인 실패", Ui.RED) {
-                Toast.makeText(this, "직접 열어보면 결과가 갱신됩니다.", Toast.LENGTH_SHORT).show()
-                openReader(c)
-            }
+            NextStatus.FAILED -> badge("확인 실패", Ui.RED) { showFailureDialog(c) }
+
+            NextStatus.NO_EPISODE -> badge("회차 없음", Ui.AMBER) { showNoEpisodeDialog(c) }
 
             NextStatus.UNKNOWN -> null
         }
+    }
+
+    /** 왜 실패했는지 그대로 보여준다. 원인을 짐작하게 만들지 않는다. */
+    private fun showFailureDialog(c: Comic) {
+        AlertDialog.Builder(this)
+            .setTitle(c.title)
+            .setMessage(
+                (c.nextNote ?: "원인을 알 수 없습니다") +
+                    "\n\n직접 열어보면 그 페이지를 보고 결과가 갱신됩니다.",
+            )
+            .setPositiveButton("열어보기") { _, _ -> openReader(c) }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
+
+    /** 회차 번호가 없는 주소는 다시 확인해도 소용없다. 주소를 고쳐야 한다. */
+    private fun showNoEpisodeDialog(c: Comic) {
+        AlertDialog.Builder(this)
+            .setTitle(c.title)
+            .setMessage(
+                "저장된 주소에 회차 번호가 없습니다.\n작품 목록 페이지를 저장하신 것 같습니다.\n\n" +
+                    SiteUrl.decodeUri(c.path) +
+                    "\n\n회차 페이지 주소로 바꾸면 확인할 수 있습니다.",
+            )
+            .setPositiveButton("주소 수정") { _, _ -> showComicDialog(existing = c) }
+            .setNeutralButton("열어보기") { _, _ -> openReader(c) }
+            .setNegativeButton("닫기", null)
+            .show()
     }
 
     private fun badge(text: String, color: Int, onClick: (() -> Unit)?): TextView =
@@ -297,7 +325,7 @@ class MainActivity : AppCompatActivity() {
             comics,
             onEach = { r ->
                 done++
-                store.setNext(r.comicId, r.status)
+                store.setNext(r.comicId, r.status, r.note)
                 checkButton.text = "확인 중… $done/${comics.size}"
                 render()
             },
@@ -306,8 +334,14 @@ class MainActivity : AppCompatActivity() {
                 checkButton.isEnabled = true
                 checkButton.text = "새 회차 확인"
                 render()
-                val failed = store.comics.count { it.next == NextStatus.FAILED }
-                if (failed > 0) toast("${failed}편은 확인하지 못했습니다. 직접 열어보면 갱신됩니다.")
+                val list = store.comics
+                val failed = list.count { it.next == NextStatus.FAILED }
+                val noEp = list.count { it.next == NextStatus.NO_EPISODE }
+                when {
+                    failed > 0 && noEp > 0 -> toast("실패 ${failed}편 · 회차 없는 주소 ${noEp}편. 배지를 눌러 확인하세요.")
+                    failed > 0 -> toast("${failed}편 실패. 배지를 누르면 이유가 나옵니다.")
+                    noEp > 0 -> toast("${noEp}편은 주소에 회차 번호가 없습니다.")
+                }
             },
         )
     }

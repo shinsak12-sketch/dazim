@@ -5,14 +5,20 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/** 다음 회차 확인 결과. 실패를 따로 두어야 화면에서 구분해 보여줄 수 있다. */
-enum class NextStatus { UNKNOWN, YES, NO, FAILED }
+/**
+ * 다음 회차 확인 결과.
+ * 실패와 "회차 번호가 없는 주소"를 나눈다. 전자는 다시 시도하면 되지만
+ * 후자는 주소를 고쳐야 하므로 사용자가 할 일이 다르다.
+ */
+enum class NextStatus { UNKNOWN, YES, NO, FAILED, NO_EPISODE }
 
 data class Comic(
     val id: String,
     var title: String,
     var path: String,
     var next: NextStatus = NextStatus.UNKNOWN,
+    /** 확인이 실패했을 때의 이유. 원인을 짐작하지 않아도 되도록 그대로 남긴다. */
+    var nextNote: String? = null,
 )
 
 /**
@@ -70,7 +76,8 @@ class Store(context: Context) {
                     val next = runCatching {
                         NextStatus.valueOf(o.optString("next", NextStatus.UNKNOWN.name))
                     }.getOrDefault(NextStatus.UNKNOWN)
-                    out.add(Comic(id, o.optString("title", "제목 없음"), path, next))
+                    val note = o.optString("nextNote", "").ifEmpty { null }
+                    out.add(Comic(id, o.optString("title", "제목 없음"), path, next, note))
                 }
                 out
             } catch (e: Exception) {
@@ -82,7 +89,8 @@ class Store(context: Context) {
             for (c in value) {
                 arr.put(
                     JSONObject().put("id", c.id).put("title", c.title).put("path", c.path)
-                        .put("next", c.next.name),
+                        .put("next", c.next.name)
+                        .put("nextNote", c.nextNote ?: ""),
                 )
             }
             prefs.edit().putString(KEY_COMICS, arr.toString()).apply()
@@ -120,15 +128,17 @@ class Store(context: Context) {
         if (path != null && path != c.path) {
             c.path = path
             c.next = NextStatus.UNKNOWN
+            c.nextNote = null
         }
         comics = list
     }
 
-    fun setNext(id: String, next: NextStatus) {
+    fun setNext(id: String, next: NextStatus, note: String? = null) {
         val list = comics
         val c = list.firstOrNull { it.id == id } ?: return
-        if (c.next == next) return
+        if (c.next == next && c.nextNote == note) return
         c.next = next
+        c.nextNote = note
         comics = list
     }
 
