@@ -25,8 +25,10 @@ object EpisodeCheck {
 
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 20_000
-    /** 링크를 훑어야 하는 경우에만 본문을 받는다. 다음 화 링크는 문서 아래쪽에 있다. */
-    private const val MAX_BYTES_FOR_LINKS = 512 * 1024
+    /** 링크를 훑어야 할 때 뒤쪽만 받아보는 크기. 이전/다음 링크는 문서 아래쪽에 있다. */
+    private const val TAIL_BYTES = 96 * 1024
+    /** 뒤쪽만으로 못 찾았을 때 통째로 받는 한도. */
+    private const val FULL_BYTES = 512 * 1024
     /** 동시에 너무 많이 물면 사이트가 끊는다. */
     private const val CONCURRENCY = 2
     private const val UA =
@@ -104,19 +106,33 @@ object EpisodeCheck {
     /**
      * 부제가 붙는 작품용. 주소를 지어낼 수 없으므로 보던 페이지의 링크를 훑는다.
      * 회차 번호 앞부분까지만 맞춰보고 뒤의 숫자를 읽으므로 부제가 무엇이든 걸린다.
+     *
+     * 이 사이트는 광고가 많아 페이지가 무겁다. 이전/다음 링크는 문서 아래쪽에 있으니
+     * 먼저 끝부분만 요청해 본다. 서버가 구간 요청을 받아주지 않거나 거기서 링크를
+     * 못 찾으면 그때만 통째로 받는다.
      */
     private fun checkByLinks(domain: SiteUrl.Domain, comic: Comic, ref: SiteUrl.Episode): Result {
         val url = SiteUrl.buildUrl(domain, comic.path)
-        val page = fetch(url, maxBytes = MAX_BYTES_FOR_LINKS)
-            ?: return Result(comic.id, NextStatus.FAILED, "접속하지 못했습니다 (시간 초과 또는 연결 끊김)")
-        if (page.status != 200) {
-            return Result(comic.id, NextStatus.FAILED, "사이트가 ${page.status} 로 응답했습니다")
+
+        val tail = fetch(url, maxBytes = TAIL_BYTES, tailOnly = true)
+        findMaxEpisode(tail, ref)?.let {
+            return Result(comic.id, if (it > ref.ep) NextStatus.YES else NextStatus.NO, null)
         }
 
-        val max = page.decodings().mapNotNull { SiteUrl.maxLinkedEpisode(it, ref) }.maxOrNull()
-            ?: return Result(comic.id, NextStatus.FAILED, "페이지에서 회차 링크를 찾지 못했습니다")
+        val whole = fetch(url, maxBytes = FULL_BYTES)
+            ?: return Result(comic.id, NextStatus.FAILED, "접속하지 못했습니다 (시간 초과 또는 연결 끊김)")
+        if (whole.status !in 200..299) {
+            return Result(comic.id, NextStatus.FAILED, "사이트가 ${whole.status} 로 응답했습니다")
+        }
 
+        val max = findMaxEpisode(whole, ref)
+            ?: return Result(comic.id, NextStatus.FAILED, "페이지에서 회차 링크를 찾지 못했습니다")
         return Result(comic.id, if (max > ref.ep) NextStatus.YES else NextStatus.NO, null)
+    }
+
+    private fun findMaxEpisode(page: Page?, ref: SiteUrl.Episode): Int? {
+        if (page == null || page.status !in 200..299) return null
+        return page.decodings().mapNotNull { SiteUrl.maxLinkedEpisode(it, ref) }.maxOrNull()
     }
 
     private class Page(
@@ -144,7 +160,7 @@ object EpisodeCheck {
         return runCatching { charset(name) }.getOrNull()
     }
 
-    private fun fetch(url: String, maxBytes: Int): Page? {
+    private fun fetch(url: String, maxBytes: Int, tailOnly: Boolean = false): Page? {
         var conn: HttpURLConnection? = null
         return try {
             conn = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -154,6 +170,8 @@ object EpisodeCheck {
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", UA)
                 setRequestProperty("Accept", "text/html,application/xhtml+xml")
+                // 뒤쪽만 달라고 요청한다. 서버가 안 받아주면 그냥 전체를 보내온다.
+                if (tailOnly) setRequestProperty("Range", "bytes=-$maxBytes")
             }
             val status = conn.responseCode
             val stream = if (status in 200..299) conn.inputStream else conn.errorStream
