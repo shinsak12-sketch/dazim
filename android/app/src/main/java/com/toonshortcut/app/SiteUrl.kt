@@ -193,31 +193,41 @@ object SiteUrl {
     // ---------------------------------------------------------------- 다음 회차 확인
 
     /**
-     * 페이지에 특정 회차로 가는 링크가 있는지 본다.
+     * 페이지에서 이 작품의 회차 링크들을 찾아 가장 큰 번호를 돌려준다.
      *
-     * 뷰어 하단의 오른쪽 화살표가 곧 다음 화 링크다. 그게 있으면 다음 화가 나온 것이다.
+     * 회차 번호 "앞부분"까지만 맞춰보고 그 뒤의 숫자를 읽는다. 뒷부분은 보지 않는다.
+     * 이 사이트에는 "제목_209화_:_부제.html" 처럼 회차마다 부제가 바뀌는 작품이 있어서,
+     * 숫자만 바꿔 주소를 지어내면 존재하지 않는 주소가 된다. 앞부분만 맞추면
+     * 부제가 무엇이든 걸린다.
      *
-     * "(총93화)" 같은 표기는 쓸 수 없다. 0화가 있는 작품은 개수와 회차 번호가
-     * 어긋나기 때문이다(92화가 마지막인데 총93화로 적힌다).
-     *
-     * href 가 절대경로인지 상대경로인지, 한글이 인코딩돼 있는지가 사이트마다
-     * 달라서 파일 이름만 가지고 찾는다. 인코딩된 형태와 그렇지 않은 형태를 모두 본다.
+     * href 가 절대경로든 상대경로든 걸리도록 파일 이름 쪽만 본다.
+     * 퍼센트 인코딩은 대소문자가 섞여 나오므로 대소문자를 무시한다.
      */
-    fun linksToEpisode(html: String, ref: Episode, ep: Int): Boolean {
-        val encoded = buildEpisodePath(ref, ep)
-        val encodedName = encoded.substringAfterLast('/')
-        val decodedName = decodeUri(encoded).substringAfterLast('/')
-        if (encodedName.isEmpty()) return false
-        // 퍼센트 인코딩은 대소문자가 섞여 나올 수 있다(%ED vs %ed).
-        return html.contains(encodedName, ignoreCase = true) || html.contains(decodedName)
+    fun maxLinkedEpisode(html: String, ref: Episode): Int? {
+        val decodedName = ref.before.substringAfterLast('/')
+        val encodedName = encodeUri(ref.before).substringAfterLast('/')
+        if (decodedName.isEmpty() && encodedName.isEmpty()) return null
+
+        var max: Int? = null
+        for (needle in listOf(encodedName, decodedName).distinct().filter { it.isNotEmpty() }) {
+            val re = Regex(Regex.escape(needle) + "(\\d{1,5})", RegexOption.IGNORE_CASE)
+            for (m in re.findAll(html)) {
+                val n = m.groupValues[1].toIntOrNull() ?: continue
+                if (max == null || n > max!!) max = n
+            }
+        }
+        return max
     }
 
     /**
-     * 받아온 페이지가 정말 그 회차의 것인지 대충 확인한다.
+     * 받아온 페이지가 정말 그 회차의 것인지 확인한다.
      *
-     * 없는 회차에 404 대신 200과 함께 안내 페이지를 주는 사이트가 있어서,
-     * 상태 코드만 믿으면 있지도 않은 회차를 있다고 세게 된다.
+     * 없는 회차에 404 대신 200과 안내 페이지를 주는 사이트가 있어서
+     * 상태 코드만으로는 판단할 수 없다.
+     *
+     * 이 사이트는 회차를 "074화" 처럼 0을 채워 적는다. 그래서 앞의 0을 허용해야 한다.
+     * 허용하지 않으면 75화를 찾을 때 "075화" 가 걸리지 않아 없는 회차로 오해한다.
      */
     fun looksLikeEpisode(html: String, ep: Int): Boolean =
-        Regex("(?<!\\d)$ep\\s*화").containsMatchIn(html)
+        Regex("(?<!\\d)0*$ep\\s*화").containsMatchIn(html)
 }
