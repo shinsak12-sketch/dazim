@@ -228,4 +228,20 @@ object SiteUrl {
      */
     fun hasSimpleTail(ref: Episode): Boolean =
         Regex("^\\s*화\\s*\\.(html?|php|aspx?|jsp)$", RegexOption.IGNORE_CASE).matches(ref.after)
+
+    /**
+     * 회차 주소에서 그 작품의 목록 페이지 주소를 추측한다.
+     *
+     * 이 사이트는 회차 주소에 밑줄을, 목록 주소에 붙임표를 쓴다.
+     *   /몽둥이기사_단_45화.html  ->  /몽둥이기사-단
+     *
+     * 목록 페이지에는 모든 회차 링크가 있어서 최신 회차를 바로 알 수 있다.
+     * 0을 채워 쓰든 부제가 붙든 상관이 없고, 작품마다 주소가 고정이라
+     * 한 번 맞히면 계속 쓸 수 있다.
+     */
+    fun guessListPath(ref: Episode): String? {
+        val name = ref.before.substringAfterLast('/').trimEnd('_', '-', ' ')
+        if (name.isEmpty()) return null
+        return "/" + encodeUri(name.replace('_', '-'))
+    }
 }

@@ -19,6 +19,13 @@ data class Comic(
     var next: NextStatus = NextStatus.UNKNOWN,
     /** 확인이 실패했을 때의 이유. 원인을 짐작하지 않아도 되도록 그대로 남긴다. */
     var nextNote: String? = null,
+    /**
+     * 이 작품의 목록 페이지 주소. 비워두면 회차 주소에서 추측한다.
+     * 추측이 빗나가는 작품만 직접 채워 넣으면 된다.
+     */
+    var listPath: String? = null,
+    /** 목록 페이지에서 읽은 최신 회차. 몇 화 밀렸는지 보여주는 데 쓴다. */
+    var latestEp: Int? = null,
 )
 
 /**
@@ -101,7 +108,9 @@ class Store(context: Context) {
                         NextStatus.valueOf(o.optString("next", NextStatus.UNKNOWN.name))
                     }.getOrDefault(NextStatus.UNKNOWN)
                     val note = o.optString("nextNote", "").ifEmpty { null }
-                    out.add(Comic(id, o.optString("title", "제목 없음"), path, next, note))
+                    val listPath = o.optString("listPath", "").ifEmpty { null }
+                    val latestEp = if (o.has("latestEp") && !o.isNull("latestEp")) o.optInt("latestEp") else null
+                    out.add(Comic(id, o.optString("title", "제목 없음"), path, next, note, listPath, latestEp))
                 }
                 out
             } catch (e: Exception) {
@@ -114,7 +123,9 @@ class Store(context: Context) {
                 arr.put(
                     JSONObject().put("id", c.id).put("title", c.title).put("path", c.path)
                         .put("next", c.next.name)
-                        .put("nextNote", c.nextNote ?: ""),
+                        .put("nextNote", c.nextNote ?: "")
+                        .put("listPath", c.listPath ?: "")
+                        .put("latestEp", c.latestEp ?: JSONObject.NULL),
                 )
             }
             prefs.edit().putString(comicsKey, arr.toString()).apply()
@@ -144,25 +155,33 @@ class Store(context: Context) {
         return c
     }
 
-    fun updateComic(id: String, title: String? = null, path: String? = null) {
+    fun updateComic(
+        id: String,
+        title: String? = null,
+        path: String? = null,
+        listPath: String? = null,
+    ) {
         val list = comics
         val c = list.firstOrNull { it.id == id } ?: return
         if (title != null) c.title = title
+        if (listPath != null) c.listPath = listPath.ifEmpty { null }
         // 회차가 바뀌면 "다음 화가 있나"에 대한 이전 판정은 더 이상 맞지 않는다.
         if (path != null && path != c.path) {
             c.path = path
             c.next = NextStatus.UNKNOWN
             c.nextNote = null
+            c.latestEp = null
         }
         comics = list
     }
 
-    fun setNext(id: String, next: NextStatus, note: String? = null) {
+    fun setNext(id: String, next: NextStatus, note: String? = null, latestEp: Int? = null) {
         val list = comics
         val c = list.firstOrNull { it.id == id } ?: return
-        if (c.next == next && c.nextNote == note) return
+        if (c.next == next && c.nextNote == note && c.latestEp == latestEp) return
         c.next = next
         c.nextNote = note
+        c.latestEp = latestEp
         comics = list
     }
 
@@ -195,7 +214,12 @@ class Store(context: Context) {
             .put(
                 "comics",
                 JSONArray().apply {
-                    for (c in comics) put(JSONObject().put("title", c.title).put("path", c.path))
+                    for (c in comics) {
+                        put(
+                            JSONObject().put("title", c.title).put("path", c.path)
+                                .put("listPath", c.listPath ?: ""),
+                        )
+                    }
                 },
             )
             .toString(2)
@@ -221,7 +245,14 @@ class Store(context: Context) {
             val c = arr.optJSONObject(i) ?: continue
             val path = c.optString("path", "")
             if (path.isEmpty() || !seen.add(path)) continue
-            list.add(Comic(UUID.randomUUID().toString(), c.optString("title", SiteUrl.guessTitle(path)), path))
+            list.add(
+                Comic(
+                    id = UUID.randomUUID().toString(),
+                    title = c.optString("title", SiteUrl.guessTitle(path)),
+                    path = path,
+                    listPath = c.optString("listPath", "").ifEmpty { null },
+                ),
+            )
             added++
         }
         comics = list

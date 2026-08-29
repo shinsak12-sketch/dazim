@@ -11,20 +11,28 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * 저장된 만화에 다음 회차가 나왔는지 확인한다.
  *
- * 주소의 회차 숫자만 하나 올려서 그 페이지가 있는지 본다. 200이면 나온 것이고
- * 404면 아직 없는 것이다. 본문을 읽지 않으므로 "074화" 처럼 0을 채워 쓰든 말든
- * 상관이 없다. 주소를 만들 때 0은 그대로 유지되기 때문이다.
+ * 작품마다 목록 페이지가 있고 주소가 고정이다(/몽둥이기사-단). 거기에 모든 회차
+ * 링크가 최신순으로 있으므로, 그 페이지 하나만 보면 최신 회차를 바로 알 수 있다.
+ * 0을 채워 쓰든("074화") 회차마다 부제가 바뀌든 상관이 없다.
  *
- * 다만 "천마는_..._209화_:_부제.html" 처럼 회차마다 부제가 바뀌는 작품은
- * 숫자만 올리면 없는 주소가 된다. 그런 작품만 현재 페이지의 링크를 훑어
- * 가장 큰 회차를 찾는다.
+ * 목록 주소는 회차 주소에서 추측한다. 밑줄을 붙임표로 바꾸고 회차 부분을 떼면 된다.
+ * 추측이 빗나가는 작품은 사용자가 직접 목록 주소를 넣을 수 있고, 그마저 없으면
+ * 예전 방식(다음 회차 주소 열어보기 / 보던 페이지 링크 훑기)으로 물러선다.
  */
 object EpisodeCheck {
 
-    data class Result(val comicId: String, val status: NextStatus, val note: String?)
+    data class Result(
+        val comicId: String,
+        val status: NextStatus,
+        val note: String?,
+        /** 목록 페이지에서 읽어낸 최신 회차. 못 읽었으면 null. */
+        val latestEp: Int? = null,
+    )
 
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 20_000
+    /** 목록 페이지는 최신 회차가 위에 있으므로 앞부분만 받으면 된다. */
+    private const val LIST_BYTES = 192 * 1024
     /** 링크를 훑어야 할 때 뒤쪽만 받아보는 크기. 이전/다음 링크는 문서 아래쪽에 있다. */
     private const val TAIL_BYTES = 96 * 1024
     /** 뒤쪽만으로 못 찾았을 때 통째로 받는 한도. */
@@ -68,11 +76,39 @@ object EpisodeCheck {
         val ref = SiteUrl.parseEpisode(comic.path)
             ?: return Result(comic.id, NextStatus.NO_EPISODE, "주소에 회차 번호가 없습니다")
 
+        // 1순위: 작품 목록 페이지. 최신 회차가 그대로 적혀 있어 가장 확실하다.
+        checkByListPage(domain, comic, ref)?.let { return it }
+
+        // 목록 주소를 못 맞혔을 때만 예전 방식으로 물러선다.
         return if (SiteUrl.hasSimpleTail(ref)) {
             checkByNextUrl(domain, comic, ref)
         } else {
             checkByLinks(domain, comic, ref)
         }
+    }
+
+    /**
+     * 작품 목록 페이지에서 최신 회차를 읽는다.
+     * 목록을 못 열었거나 회차 링크가 없으면 null 을 돌려 다른 방법에 넘긴다.
+     */
+    private fun checkByListPage(
+        domain: SiteUrl.Domain,
+        comic: Comic,
+        ref: SiteUrl.Episode,
+    ): Result? {
+        val listPath = comic.listPath?.takeIf { it.isNotBlank() } ?: SiteUrl.guessListPath(ref)
+        if (listPath.isNullOrBlank()) return null
+
+        val page = fetch(SiteUrl.buildUrl(domain, listPath), maxBytes = LIST_BYTES) ?: return null
+        if (page.status !in 200..299) return null
+
+        val max = findMaxEpisode(page, ref) ?: return null
+        return Result(
+            comic.id,
+            if (max > ref.ep) NextStatus.YES else NextStatus.NO,
+            null,
+            latestEp = max,
+        )
     }
 
     /** 회차 숫자만 하나 올린 주소가 열리는지 본다. 본문은 받지 않는다. */

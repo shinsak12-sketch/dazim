@@ -267,10 +267,17 @@ class MainActivity : AppCompatActivity() {
     private fun statusBadge(c: Comic): View? {
         val ep = SiteUrl.parseEpisode(c.path)?.ep
         return when (c.next) {
-            NextStatus.YES -> badge(
-                if (ep != null) "새 회차 · ${ep + 1}화" else "새 회차",
-                Ui.GREEN,
-            ) { if (ep != null) openReader(c, ep + 1) }
+            NextStatus.YES -> {
+                val latest = c.latestEp
+                val target = if (latest != null && ep != null && latest > ep) latest else ep?.plus(1)
+                val gap = if (latest != null && ep != null) latest - ep else null
+                val text = when {
+                    target == null -> "새 회차"
+                    gap != null && gap > 1 -> "+$gap · ${target}화"
+                    else -> "새 회차 · ${target}화"
+                }
+                badge(text, Ui.GREEN) { if (target != null) openReader(c, target) }
+            }
 
             NextStatus.NO -> badge("최신", Ui.TEXT_FAINT, null)
 
@@ -368,7 +375,7 @@ class MainActivity : AppCompatActivity() {
             comics,
             onEach = { r ->
                 done++
-                store.setNext(r.comicId, r.status, r.note)
+                store.setNext(r.comicId, r.status, r.note, r.latestEp)
                 checkButton.text = "확인 중… $done/${comics.size}"
                 render()
             },
@@ -432,22 +439,36 @@ class MainActivity : AppCompatActivity() {
             setSingleLine(true)
             setText(existing?.title ?: "")
         }
+        val guessed = existing?.path?.let { SiteUrl.parseEpisode(it) }?.let { SiteUrl.guessListPath(it) }
+        val listInput = EditText(this).apply {
+            hint = guessed?.let { "비우면 자동: " + SiteUrl.decodeUri(it) } ?: "예: /몽둥이기사-단"
+            setSingleLine(true)
+            setText(existing?.listPath?.let { SiteUrl.decodeUri(it) } ?: "")
+        }
+
         box.addView(label("주소"))
         box.addView(urlInput)
         box.addView(label("제목"))
         box.addView(titleInput)
+        box.addView(label("목록 주소 (자동 추측이 틀릴 때만)"))
+        box.addView(listInput)
 
         AlertDialog.Builder(this)
             .setTitle(if (existing == null) "만화 추가" else "수정")
             .setView(box)
             .setPositiveButton("저장") { _, _ ->
-                saveComic(existing, urlInput.text.toString(), titleInput.text.toString())
+                saveComic(
+                    existing,
+                    urlInput.text.toString(),
+                    titleInput.text.toString(),
+                    listInput.text.toString(),
+                )
             }
             .setNegativeButton("취소", null)
             .show()
     }
 
-    private fun saveComic(existing: Comic?, rawUrl: String, rawTitle: String) {
+    private fun saveComic(existing: Comic?, rawUrl: String, rawTitle: String, rawList: String) {
         val parsed = SiteUrl.parseInput(rawUrl.trim())
         if (parsed == null || parsed.path.isBlank()) {
             toast("주소를 알아볼 수 없습니다.")
@@ -455,8 +476,17 @@ class MainActivity : AppCompatActivity() {
         }
         val title = rawTitle.trim().ifEmpty { SiteUrl.guessTitle(parsed.path) }
 
-        if (existing == null) store.addComic(title, parsed.path)
-        else store.updateComic(existing.id, title = title, path = parsed.path)
+        // 목록 주소는 전체 주소로 넣어도 되고 경로만 넣어도 되게 한다.
+        val listPath = rawList.trim().let { raw ->
+            if (raw.isEmpty()) "" else SiteUrl.parseInput(raw)?.path ?: ""
+        }
+
+        if (existing == null) {
+            val added = store.addComic(title, parsed.path)
+            if (listPath.isNotEmpty()) store.updateComic(added.id, listPath = listPath)
+        } else {
+            store.updateComic(existing.id, title = title, path = parsed.path, listPath = listPath)
+        }
 
         // 붙여넣은 주소의 도메인이 다르면 갱신할지 물어본다.
         val d = parsed.domain
