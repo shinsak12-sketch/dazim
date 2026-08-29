@@ -220,14 +220,12 @@ object SiteUrl {
     }
 
     /**
-     * 받아온 페이지가 정말 그 회차의 것인지 확인한다.
+     * 회차 번호 뒤에 확장자만 남는지 본다.
      *
-     * 없는 회차에 404 대신 200과 안내 페이지를 주는 사이트가 있어서
-     * 상태 코드만으로는 판단할 수 없다.
-     *
-     * 이 사이트는 회차를 "074화" 처럼 0을 채워 적는다. 그래서 앞의 0을 허용해야 한다.
-     * 허용하지 않으면 75화를 찾을 때 "075화" 가 걸리지 않아 없는 회차로 오해한다.
+     * "배드_본_블러드_92화.html" 은 숫자만 93으로 바꾸면 다음 화 주소가 된다.
+     * 하지만 "천마는_..._209화_:_부제.html" 은 회차마다 부제가 달라서
+     * 숫자만 바꾸면 존재하지 않는 주소가 나온다. 앞의 경우에만 주소를 지어낼 수 있다.
      */
-    fun looksLikeEpisode(html: String, ep: Int): Boolean =
-        Regex("(?<!\\d)0*$ep\\s*화").containsMatchIn(html)
+    fun hasSimpleTail(ref: Episode): Boolean =
+        Regex("^\\s*화\\s*\\.(html?|php|aspx?|jsp)$", RegexOption.IGNORE_CASE).matches(ref.after)
 }

@@ -370,7 +370,10 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /**
-     * 지금 열린 페이지에 다음 화 링크가 있는지 보고 목록의 표시를 갱신한다.
+     * 지금 열린 페이지의 회차 링크를 훑어 목록의 표시를 갱신한다.
+     *
+     * 회차 번호 앞부분까지만 맞춰보고 뒤의 숫자를 읽는다. 부제가 붙는 작품도,
+     * 0을 채워 쓰는 작품도 이 방식이면 같이 걸린다.
      *
      * 목록의 일괄 확인이 실패한 만화도 한 번 열어보면 여기서 결과가 채워진다.
      * 보고 있는 회차가 저장된 회차와 다를 때는 판단하지 않는다.
@@ -382,26 +385,50 @@ class ReaderActivity : AppCompatActivity() {
         val viewing = web.url?.let { SiteUrl.parseInput(it) }?.let { SiteUrl.parseEpisode(it.path) }
         if (viewing == null || viewing.ep != ref.ep) return
 
-        val nextPath = SiteUrl.buildEpisodePath(ref, ref.ep + 1)
-        val encoded = JSONObject.quote(nextPath.substringAfterLast('/').lowercase())
-        val decoded = JSONObject.quote(SiteUrl.decodeUri(nextPath).substringAfterLast('/'))
+        val encoded = JSONObject.quote(SiteUrl.encodeUri(ref.before).substringAfterLast('/').lowercase())
+        val decoded = JSONObject.quote(ref.before.substringAfterLast('/'))
 
+        // 정규식 이스케이프를 피하려고 문자열 검색으로 훑는다.
+        // 제목에 . ( ) 같은 글자가 섞여도 안전하다.
         val js = """
             (function () {
               try {
-                var h = document.documentElement.outerHTML;
-                var l = h.toLowerCase();
-                return (l.indexOf($encoded) >= 0 || h.indexOf($decoded) >= 0) ? "1" : "0";
-              } catch (e) { return "?"; }
+                var html = document.documentElement.outerHTML;
+                var lower = html.toLowerCase();
+                var max = -1;
+                var pairs = [[$encoded, lower], [$decoded, html]];
+                for (var p = 0; p < pairs.length; p++) {
+                  var needle = pairs[p][0];
+                  var hay = pairs[p][1];
+                  if (!needle) continue;
+                  var at = 0;
+                  while ((at = hay.indexOf(needle, at)) !== -1) {
+                    var j = at + needle.length;
+                    var digits = "";
+                    while (j < hay.length && hay.charAt(j) >= "0" && hay.charAt(j) <= "9") {
+                      digits += hay.charAt(j);
+                      j++;
+                    }
+                    if (digits.length > 0) {
+                      var v = parseInt(digits, 10);
+                      if (v > max) max = v;
+                    }
+                    at += needle.length;
+                  }
+                }
+                return String(max);
+              } catch (e) {
+                return "?";
+              }
             })()
         """.trimIndent()
 
         web.evaluateJavascript(js) { raw ->
-            when (raw?.trim()?.trim('"')) {
-                "1" -> store.setNext(comicId, NextStatus.YES)
-                "0" -> store.setNext(comicId, NextStatus.NO)
-                else -> Unit // 판단 불가. 기존 값을 건드리지 않는다.
+            val max = raw?.trim()?.trim('"')?.toIntOrNull()
+            if (max != null && max >= 0) {
+                store.setNext(comicId, if (max > ref.ep) NextStatus.YES else NextStatus.NO)
             }
+            // 판단할 수 없으면 기존 값을 건드리지 않는다.
         }
     }
 
