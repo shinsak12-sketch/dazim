@@ -269,14 +269,23 @@ class MainActivity : AppCompatActivity() {
         return when (c.next) {
             NextStatus.YES -> {
                 val latest = c.latestEp
-                val target = if (latest != null && ep != null && latest > ep) latest else ep?.plus(1)
                 val gap = if (latest != null && ep != null) latest - ep else null
+                val shown = latest ?: ep?.plus(1)
                 val text = when {
-                    target == null -> "새 회차"
-                    gap != null && gap > 1 -> "+$gap · ${target}화"
-                    else -> "새 회차 · ${target}화"
+                    shown == null -> "새 회차"
+                    gap != null && gap > 1 -> "+$gap · ${shown}화"
+                    else -> "새 회차 · ${shown}화"
                 }
-                badge(text, Ui.GREEN) { if (target != null) openReader(c, target) }
+                badge(text, Ui.GREEN) {
+                    // 사이트가 준 주소가 있으면 그걸 쓴다. 표기가 바뀌는 작품은
+                    // 번호만 갈아끼워서는 주소를 만들 수 없다.
+                    val exact = c.latestPath
+                    when {
+                        !exact.isNullOrBlank() -> openReaderAt(c, exact)
+                        ep != null -> openReader(c, ep + 1)
+                        else -> openReader(c)
+                    }
+                }
             }
 
             NextStatus.NO -> badge("최신", Ui.TEXT_FAINT, null)
@@ -353,6 +362,15 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
+    /** 사이트가 알려준 주소로 그대로 연다. */
+    private fun openReaderAt(c: Comic, path: String) {
+        startActivity(
+            Intent(this, ReaderActivity::class.java)
+                .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id)
+                .putExtra(ReaderActivity.EXTRA_PATH, path),
+        )
+    }
+
     /** 저장된 만화들에 다음 회차가 나왔는지 한 번에 확인한다. 결과는 끝나는 대로 하나씩 반영된다. */
     private fun checkNewEpisodes(sortAfter: Boolean = false) {
         if (checking) {
@@ -375,7 +393,7 @@ class MainActivity : AppCompatActivity() {
             comics,
             onEach = { r ->
                 done++
-                store.setNext(r.comicId, r.status, r.note, r.latestEp)
+                store.setNext(r.comicId, r.status, r.note, r.latestEp, r.latestPath)
                 checkButton.text = "확인 중… $done/${comics.size}"
                 render()
             },

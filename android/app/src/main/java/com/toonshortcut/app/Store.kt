@@ -26,6 +26,12 @@ data class Comic(
     var listPath: String? = null,
     /** 목록 페이지에서 읽은 최신 회차. 몇 화 밀렸는지 보여주는 데 쓴다. */
     var latestEp: Int? = null,
+    /**
+     * 최신 회차의 실제 주소. 사이트가 준 것을 그대로 담는다.
+     * 도중에 표기가 바뀌는 작품이 있어("074화" -> "EP.075_부제") 번호만
+     * 갈아끼워서는 주소를 만들 수 없다.
+     */
+    var latestPath: String? = null,
 )
 
 /**
@@ -110,7 +116,10 @@ class Store(context: Context) {
                     val note = o.optString("nextNote", "").ifEmpty { null }
                     val listPath = o.optString("listPath", "").ifEmpty { null }
                     val latestEp = if (o.has("latestEp") && !o.isNull("latestEp")) o.optInt("latestEp") else null
-                    out.add(Comic(id, o.optString("title", "제목 없음"), path, next, note, listPath, latestEp))
+                    val latestPath = o.optString("latestPath", "").ifEmpty { null }
+                    out.add(
+                        Comic(id, o.optString("title", "제목 없음"), path, next, note, listPath, latestEp, latestPath),
+                    )
                 }
                 out
             } catch (e: Exception) {
@@ -125,7 +134,8 @@ class Store(context: Context) {
                         .put("next", c.next.name)
                         .put("nextNote", c.nextNote ?: "")
                         .put("listPath", c.listPath ?: "")
-                        .put("latestEp", c.latestEp ?: JSONObject.NULL),
+                        .put("latestEp", c.latestEp ?: JSONObject.NULL)
+                        .put("latestPath", c.latestPath ?: ""),
                 )
             }
             prefs.edit().putString(comicsKey, arr.toString()).apply()
@@ -171,17 +181,25 @@ class Store(context: Context) {
             c.next = NextStatus.UNKNOWN
             c.nextNote = null
             c.latestEp = null
+            c.latestPath = null
         }
         comics = list
     }
 
-    fun setNext(id: String, next: NextStatus, note: String? = null, latestEp: Int? = null) {
+    fun setNext(
+        id: String,
+        next: NextStatus,
+        note: String? = null,
+        latestEp: Int? = null,
+        latestPath: String? = null,
+    ) {
         val list = comics
         val c = list.firstOrNull { it.id == id } ?: return
-        if (c.next == next && c.nextNote == note && c.latestEp == latestEp) return
+        if (c.next == next && c.nextNote == note && c.latestEp == latestEp && c.latestPath == latestPath) return
         c.next = next
         c.nextNote = note
         c.latestEp = latestEp
+        c.latestPath = latestPath
         comics = list
     }
 

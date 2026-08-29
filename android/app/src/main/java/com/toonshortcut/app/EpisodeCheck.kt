@@ -27,6 +27,8 @@ object EpisodeCheck {
         val note: String?,
         /** 목록 페이지에서 읽어낸 최신 회차. 못 읽었으면 null. */
         val latestEp: Int? = null,
+        /** 최신 회차의 실제 주소. 표기가 바뀌는 작품은 지어낼 수 없어 그대로 담는다. */
+        val latestPath: String? = null,
     )
 
     private const val CONNECT_TIMEOUT_MS = 10_000
@@ -102,12 +104,13 @@ object EpisodeCheck {
         val page = fetch(SiteUrl.buildUrl(domain, listPath), maxBytes = LIST_BYTES) ?: return null
         if (page.status !in 200..299) return null
 
-        val max = findMaxEpisode(page, ref) ?: return null
+        val latest = findLatest(page, ref) ?: return null
         return Result(
             comic.id,
-            if (max > ref.ep) NextStatus.YES else NextStatus.NO,
+            if (latest.ep > ref.ep) NextStatus.YES else NextStatus.NO,
             null,
-            latestEp = max,
+            latestEp = latest.ep,
+            latestPath = latest.path,
         )
     }
 
@@ -151,8 +154,14 @@ object EpisodeCheck {
         val url = SiteUrl.buildUrl(domain, comic.path)
 
         val tail = fetch(url, maxBytes = TAIL_BYTES, tailOnly = true)
-        findMaxEpisode(tail, ref)?.let {
-            return Result(comic.id, if (it > ref.ep) NextStatus.YES else NextStatus.NO, null)
+        findLatest(tail, ref)?.let {
+            return Result(
+                comic.id,
+                if (it.ep > ref.ep) NextStatus.YES else NextStatus.NO,
+                null,
+                latestEp = it.ep,
+                latestPath = it.path,
+            )
         }
 
         val whole = fetch(url, maxBytes = FULL_BYTES)
@@ -161,14 +170,22 @@ object EpisodeCheck {
             return Result(comic.id, NextStatus.FAILED, "사이트가 ${whole.status} 로 응답했습니다")
         }
 
-        val max = findMaxEpisode(whole, ref)
+        val latest = findLatest(whole, ref)
             ?: return Result(comic.id, NextStatus.FAILED, "페이지에서 회차 링크를 찾지 못했습니다")
-        return Result(comic.id, if (max > ref.ep) NextStatus.YES else NextStatus.NO, null)
+        return Result(
+            comic.id,
+            if (latest.ep > ref.ep) NextStatus.YES else NextStatus.NO,
+            null,
+            latestEp = latest.ep,
+            latestPath = latest.path,
+        )
     }
 
-    private fun findMaxEpisode(page: Page?, ref: SiteUrl.Episode): Int? {
+    private fun findLatest(page: Page?, ref: SiteUrl.Episode): SiteUrl.EpisodeLink? {
         if (page == null || page.status !in 200..299) return null
-        return page.decodings().mapNotNull { SiteUrl.maxLinkedEpisode(it, ref) }.maxOrNull()
+        return page.decodings()
+            .mapNotNull { SiteUrl.findLatestEpisodeLink(it, ref) }
+            .maxByOrNull { it.ep }
     }
 
     private class Page(

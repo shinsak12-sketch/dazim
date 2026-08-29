@@ -192,31 +192,57 @@ object SiteUrl {
 
     // ---------------------------------------------------------------- 다음 회차 확인
 
+    data class EpisodeLink(val ep: Int, val path: String)
+
     /**
-     * 페이지에서 이 작품의 회차 링크들을 찾아 가장 큰 번호를 돌려준다.
+     * 페이지에서 이 작품의 회차 링크를 찾아 가장 최신 것을 돌려준다.
      *
-     * 회차 번호 "앞부분"까지만 맞춰보고 그 뒤의 숫자를 읽는다. 뒷부분은 보지 않는다.
-     * 이 사이트에는 "제목_209화_:_부제.html" 처럼 회차마다 부제가 바뀌는 작품이 있어서,
-     * 숫자만 바꿔 주소를 지어내면 존재하지 않는 주소가 된다. 앞부분만 맞추면
-     * 부제가 무엇이든 걸린다.
+     * 번호만 세지 않고 링크 주소를 통째로 가져온다. 도중에 표기 방식이 바뀌는
+     * 작품이 있기 때문이다. 예를 들어 74화까지는 "..._074화.html" 이다가
+     * 75화부터 "..._EP.075_새로운_시작.html" 로 바뀐다. 이런 주소는 번호만
+     * 갈아끼워서는 만들어낼 수 없으므로 사이트가 준 주소를 그대로 써야 한다.
      *
-     * href 가 절대경로든 상대경로든 걸리도록 파일 이름 쪽만 본다.
-     * 퍼센트 인코딩은 대소문자가 섞여 나오므로 대소문자를 무시한다.
+     * 제목 뒤에 "EP." 같은 표시가 끼어들 수 있어 숫자 앞의 짧은 글자는 건너뛴다.
+     * href 가 절대경로든 상대경로든, 한글이 인코딩돼 있든 아니든 걸리게 한다.
      */
-    fun maxLinkedEpisode(html: String, ref: Episode): Int? {
+    fun findLatestEpisodeLink(html: String, ref: Episode): EpisodeLink? {
         val decodedName = ref.before.substringAfterLast('/')
         val encodedName = encodeUri(ref.before).substringAfterLast('/')
-        if (decodedName.isEmpty() && encodedName.isEmpty()) return null
+        val needles = listOf(encodedName, decodedName).distinct().filter { it.isNotEmpty() }
+        if (needles.isEmpty()) return null
 
-        var max: Int? = null
-        for (needle in listOf(encodedName, decodedName).distinct().filter { it.isNotEmpty() }) {
-            val re = Regex(Regex.escape(needle) + "(\\d{1,5})", RegexOption.IGNORE_CASE)
-            for (m in re.findAll(html)) {
-                val n = m.groupValues[1].toIntOrNull() ?: continue
-                if (max == null || n > max!!) max = n
+        val hrefRe = Regex("""href\s*=\s*["']([^"'>]+)["']""", RegexOption.IGNORE_CASE)
+        // 제목과 숫자 사이에 끼어들 수 있는 표시. "EP." 처럼 짧은 것만 허용한다.
+        val numRe = Regex("""^[A-Za-z._\-]{0,6}(\d{1,5})""")
+
+        var best: EpisodeLink? = null
+        for (m in hrefRe.findAll(html)) {
+            val href = m.groupValues[1].trim()
+            for (needle in needles) {
+                val at = href.indexOf(needle, ignoreCase = true)
+                if (at < 0) continue
+                val tail = href.substring(at + needle.length)
+                val ep = numRe.find(tail)?.groupValues?.get(1)?.toIntOrNull() ?: continue
+                val path = toPath(href) ?: continue
+                val current = best
+                if (current == null || ep > current.ep) best = EpisodeLink(ep, path)
+                break
             }
         }
-        return max
+        return best
+    }
+
+    /** href 를 우리가 저장하는 형태(인코딩된 절대 경로)로 맞춘다. */
+    private fun toPath(href: String): String? {
+        val raw = when {
+            href.startsWith("http://", true) || href.startsWith("https://", true) ->
+                runCatching { java.net.URI(encodeUri(decodeUri(href))).rawPath }.getOrNull() ?: return null
+            href.startsWith("/") -> href
+            else -> "/$href"
+        }
+        if (raw.isEmpty() || raw == "/") return null
+        // 한글이 그대로 들어 있으면 인코딩해 둔다. 이미 인코딩돼 있으면 그대로 유지된다.
+        return if (raw.any { it.code > 127 }) encodeUri(raw) else raw
     }
 
     /**

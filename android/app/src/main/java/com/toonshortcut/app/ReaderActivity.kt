@@ -40,6 +40,8 @@ class ReaderActivity : AppCompatActivity() {
         const val EXTRA_COMIC_ID = "comic_id"
         /** 목록에서 "새 회차 보기"로 들어올 때 건너뛸 회차 */
         const val EXTRA_EPISODE = "episode"
+        /** 사이트가 알려준 주소로 바로 열 때. 번호만으로는 만들 수 없는 주소가 있다. */
+        const val EXTRA_PATH = "path"
     }
 
     private lateinit var store: Store
