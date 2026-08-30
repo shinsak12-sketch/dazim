@@ -1,5 +1,6 @@
 package com.toonshortcut.app
 
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -15,6 +16,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import java.io.File
@@ -44,6 +46,22 @@ class MainActivity : AppCompatActivity() {
 
     /** 마지막 확인에서 무슨 일이 있었는지. 판정이 어긋날 때 파일로 내보낸다. */
     private var lastDiagnostics: String? = null
+
+    /**
+     * 파일 저장 창.
+     * 공유(보내기)에는 "파일로 저장"이 없어서 이걸 따로 둬야 한다.
+     */
+    private val saveDiagnosticsFile =
+        registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+            val text = lastDiagnostics
+            if (uri == null || text.isNullOrBlank()) return@registerForActivityResult
+            try {
+                contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                toast("저장했습니다.")
+            } catch (e: Exception) {
+                toast("저장하지 못했습니다: ${e.message}")
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -130,7 +148,7 @@ class MainActivity : AppCompatActivity() {
         backupRow.addView(softButton("가져오기") { showImportDialog() }, weight())
         root.addView(backupRow, marginTop(14))
 
-        root.addView(softButton("진단 파일 저장") { shareDiagnostics() }, marginTop(8))
+        root.addView(softButton("진단 기록 꺼내기") { shareDiagnostics() }, marginTop(8))
 
         root.addView(TextView(this).apply {
             text = "다음 화로 넘어가면 회차가 자동으로 저장됩니다.\n" +
@@ -624,8 +642,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 확인 과정을 파일로 내보낸다.
-     * 판정이 어긋났을 때 짐작으로 고치면 또 빗나가므로 실제 응답을 봐야 한다.
+     * 확인 과정을 꺼내는 방법을 고르게 한다.
+     *
+     * 보내기(ACTION_SEND)만 두면 안드로이드가 앱 목록만 보여주고 "파일로 저장"이
+     * 나오지 않는다. 저장은 문서 만들기 창을 따로 열어야 한다.
+     * 내용을 그대로 붙여넣는 게 목적이면 복사가 가장 빠르다.
      */
     private fun shareDiagnostics() {
         val text = lastDiagnostics
@@ -633,25 +654,54 @@ class MainActivity : AppCompatActivity() {
             toast("먼저 [새 회차 확인]을 한 번 눌러주세요.")
             return
         }
+        val items = arrayOf(
+            "클립보드에 복사 (${text.length}자)",
+            "파일로 저장",
+            "다른 앱으로 보내기",
+        )
+        AlertDialog.Builder(this)
+            .setTitle("진단 기록")
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> copyDiagnostics(text)
+                    1 -> saveDiagnosticsFile.launch("manhwa-diagnostics.txt")
+                    2 -> sendDiagnostics(text)
+                }
+            }
+            .show()
+    }
+
+    private fun copyDiagnostics(text: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        if (cm == null) {
+            toast("클립보드를 쓸 수 없습니다.")
+            return
+        }
+        cm.setPrimaryClip(ClipData.newPlainText("만화 바로가기 진단", text))
+        toast("복사했습니다. 붙여넣기 하세요.")
+    }
+
+    private fun sendDiagnostics(text: String) {
         try {
             val dir = File(cacheDir, "logs").apply { mkdirs() }
             val file = File(dir, "manhwa-diagnostics.txt")
             file.writeText(text)
-
             val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
             startActivity(
                 Intent.createChooser(
                     Intent(Intent.ACTION_SEND).apply {
                         type = "text/plain"
                         putExtra(Intent.EXTRA_STREAM, uri)
+                        // 파일을 못 여는 앱을 위해 본문에도 같이 담는다.
+                        putExtra(Intent.EXTRA_TEXT, text.take(100_000))
                         putExtra(Intent.EXTRA_SUBJECT, "만화 바로가기 진단")
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     },
-                    "진단 파일 보내기",
+                    "진단 기록 보내기",
                 ),
             )
         } catch (e: Exception) {
-            toast("파일을 만들지 못했습니다: ${e.message}")
+            toast("보내지 못했습니다: ${e.message}")
         }
     }
 
