@@ -16,6 +16,11 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
 class MainActivity : AppCompatActivity() {
@@ -36,6 +41,9 @@ class MainActivity : AppCompatActivity() {
      * 그래서 앱을 다시 켜면 원래 순서로 돌아온다.
      */
     private var sortByNew = false
+
+    /** 마지막 확인에서 무슨 일이 있었는지. 판정이 어긋날 때 파일로 내보낸다. */
+    private var lastDiagnostics: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,6 +129,8 @@ class MainActivity : AppCompatActivity() {
         backupRow.addView(softButton("내보내기") { exportList() }, weightWithRightGap())
         backupRow.addView(softButton("가져오기") { showImportDialog() }, weight())
         root.addView(backupRow, marginTop(14))
+
+        root.addView(softButton("진단 파일 저장") { shareDiagnostics() }, marginTop(8))
 
         root.addView(TextView(this).apply {
             text = "다음 화로 넘어가면 회차가 자동으로 저장됩니다.\n" +
@@ -385,6 +395,7 @@ class MainActivity : AppCompatActivity() {
         }
         checking = true
         var done = 0
+        val logs = StringBuilder()
         checkButton.isEnabled = false
         checkButton.text = "확인 중… 0/${comics.size}"
 
@@ -394,6 +405,7 @@ class MainActivity : AppCompatActivity() {
             onEach = { r ->
                 done++
                 store.setNext(r.comicId, r.status, r.note, r.latestEp, r.latestPath)
+                logs.append(r.log).append('\n')
                 checkButton.text = "확인 중… $done/${comics.size}"
                 render()
             },
@@ -401,6 +413,7 @@ class MainActivity : AppCompatActivity() {
                 checking = false
                 checkButton.isEnabled = true
                 checkButton.text = "새 회차 확인"
+                lastDiagnostics = buildDiagnostics(logs.toString())
                 swipe.isRefreshing = false
                 if (sortAfter) sortByNew = true
                 render()
@@ -587,6 +600,59 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("취소", null)
             .show()
+    }
+
+    // ------------------------------------------------------------------ 진단
+
+    private fun buildDiagnostics(body: String): String {
+        val version = runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        }.getOrNull() ?: "?"
+        val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.KOREA).format(Date())
+        return buildString {
+            appendLine("만화 바로가기 진단 기록")
+            appendLine("앱 버전: $version")
+            appendLine("시각: $now")
+            appendLine("안드로이드: ${android.os.Build.VERSION.SDK_INT}")
+            appendLine("현재 주소: ${SiteUrl.buildHost(store.domain)}")
+            appendLine("목록: ${Store.activeList}")
+            appendLine("만화 수: ${store.comics.size}")
+            appendLine("=".repeat(50))
+            appendLine()
+            append(body)
+        }
+    }
+
+    /**
+     * 확인 과정을 파일로 내보낸다.
+     * 판정이 어긋났을 때 짐작으로 고치면 또 빗나가므로 실제 응답을 봐야 한다.
+     */
+    private fun shareDiagnostics() {
+        val text = lastDiagnostics
+        if (text.isNullOrBlank()) {
+            toast("먼저 [새 회차 확인]을 한 번 눌러주세요.")
+            return
+        }
+        try {
+            val dir = File(cacheDir, "logs").apply { mkdirs() }
+            val file = File(dir, "manhwa-diagnostics.txt")
+            file.writeText(text)
+
+            val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+            startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, "만화 바로가기 진단")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    },
+                    "진단 파일 보내기",
+                ),
+            )
+        } catch (e: Exception) {
+            toast("파일을 만들지 못했습니다: ${e.message}")
+        }
     }
 
     // ------------------------------------------------------------------ 뷰 도우미

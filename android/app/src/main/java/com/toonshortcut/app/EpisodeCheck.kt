@@ -11,13 +11,13 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * 저장된 만화에 다음 회차가 나왔는지 확인한다.
  *
- * 작품마다 목록 페이지가 있고 주소가 고정이다(/몽둥이기사-단). 거기에 모든 회차
- * 링크가 최신순으로 있으므로, 그 페이지 하나만 보면 최신 회차를 바로 알 수 있다.
- * 0을 채워 쓰든("074화") 회차마다 부제가 바뀌든 상관이 없다.
+ * 작품마다 목록 페이지가 있고 주소가 고정이다(/몽둥이기사-단). 거기 회차 링크를
+ * 보면 최신 회차를 알 수 있다. 번호만 세지 않고 링크 주소를 그대로 가져오는데,
+ * 도중에 표기가 바뀌는 작품이 있어("074화" -> "EP.075_부제") 번호만으로는
+ * 주소를 만들 수 없기 때문이다.
  *
- * 목록 주소는 회차 주소에서 추측한다. 밑줄을 붙임표로 바꾸고 회차 부분을 떼면 된다.
- * 추측이 빗나가는 작품은 사용자가 직접 목록 주소를 넣을 수 있고, 그마저 없으면
- * 예전 방식(다음 회차 주소 열어보기 / 보던 페이지 링크 훑기)으로 물러선다.
+ * 판정이 어긋날 때 짐작으로 고치면 또 빗나간다. 그래서 과정을 전부 기록해
+ * 파일로 내보낼 수 있게 했다. 상태 코드, 받은 크기, 실제 링크 표본까지 남긴다.
  */
 object EpisodeCheck {
 
@@ -25,21 +25,20 @@ object EpisodeCheck {
         val comicId: String,
         val status: NextStatus,
         val note: String?,
-        /** 목록 페이지에서 읽어낸 최신 회차. 못 읽었으면 null. */
+        /** 목록에서 읽어낸 최신 회차. 못 읽었으면 null. */
         val latestEp: Int? = null,
         /** 최신 회차의 실제 주소. 표기가 바뀌는 작품은 지어낼 수 없어 그대로 담는다. */
         val latestPath: String? = null,
+        /** 무슨 일이 있었는지 그대로 남긴 기록. 진단 파일에 들어간다. */
+        val log: String = "",
     )
 
     private const val CONNECT_TIMEOUT_MS = 10_000
     private const val READ_TIMEOUT_MS = 20_000
     /** 목록 페이지는 최신 회차가 위에 있으므로 앞부분만 받으면 된다. */
     private const val LIST_BYTES = 192 * 1024
-    /** 링크를 훑어야 할 때 뒤쪽만 받아보는 크기. 이전/다음 링크는 문서 아래쪽에 있다. */
-    private const val TAIL_BYTES = 96 * 1024
-    /** 뒤쪽만으로 못 찾았을 때 통째로 받는 한도. */
-    private const val FULL_BYTES = 512 * 1024
-    /** 동시에 너무 많이 물면 사이트가 끊는다. */
+    /** 보던 페이지에서 링크를 훑을 때. 이전/다음 링크는 문서 아래쪽에 있다. */
+    private const val PAGE_BYTES = 512 * 1024
     private const val CONCURRENCY = 2
     private const val UA =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
@@ -47,7 +46,13 @@ object EpisodeCheck {
     private val pool = Executors.newFixedThreadPool(CONCURRENCY)
     private val main = Handler(Looper.getMainLooper())
 
-    /** 결과는 확인이 끝나는 대로 하나씩 onEach 로 돌려준다. 전부 끝나면 onDone. */
+    /** 확인 과정을 사람이 읽을 수 있게 모아둔다. */
+    private class Log {
+        private val sb = StringBuilder()
+        fun line(text: String) { sb.append(text).append('\n') }
+        override fun toString() = sb.toString()
+    }
+
     fun checkAll(
         domain: SiteUrl.Domain,
         comics: List<Comic>,
@@ -61,50 +66,73 @@ object EpisodeCheck {
         val remaining = AtomicInteger(comics.size)
         for (c in comics) {
             pool.execute {
+                val log = Log()
                 val result = try {
-                    check(domain, c)
+                    check(domain, c, log)
                 } catch (e: Exception) {
-                    Result(c.id, NextStatus.FAILED, e.javaClass.simpleName)
+                    log.line("  예외: ${e.javaClass.simpleName}: ${e.message}")
+                    Result(c.id, NextStatus.FAILED, e.javaClass.simpleName, log = log.toString())
                 }
                 main.post {
-                    onEach(result)
+                    onEach(result.copy(log = log.toString()))
                     if (remaining.decrementAndGet() == 0) onDone()
                 }
             }
         }
     }
 
-    private fun check(domain: SiteUrl.Domain, comic: Comic): Result {
+    private fun check(domain: SiteUrl.Domain, comic: Comic, log: Log): Result {
+        log.line("[${comic.title}]")
+        log.line("  저장 경로: ${comic.path}")
+        log.line("  (디코딩) ${SiteUrl.decodeUri(comic.path)}")
+
         val ref = SiteUrl.parseEpisode(comic.path)
-            ?: return Result(comic.id, NextStatus.NO_EPISODE, "주소에 회차 번호가 없습니다")
+        if (ref == null) {
+            log.line("  → 경로에서 회차 번호를 못 찾음")
+            return Result(comic.id, NextStatus.NO_EPISODE, "주소에 회차 번호가 없습니다")
+        }
+        log.line("  회차 ${ref.ep}, 자릿수 ${ref.pad}, 뒤 \"${ref.after}\", 단순형 ${SiteUrl.hasSimpleTail(ref)}")
 
-        // 1순위: 작품 목록 페이지. 최신 회차가 그대로 적혀 있어 가장 확실하다.
-        checkByListPage(domain, comic, ref)?.let { return it }
+        checkByListPage(domain, comic, ref, log)?.let { return it }
 
-        // 목록 주소를 못 맞혔을 때만 예전 방식으로 물러선다.
+        log.line("  목록 페이지로 판정 못함 → 예비 방법으로")
         return if (SiteUrl.hasSimpleTail(ref)) {
-            checkByNextUrl(domain, comic, ref)
+            checkByNextUrl(domain, comic, ref, log)
         } else {
-            checkByLinks(domain, comic, ref)
+            checkByLinks(domain, comic, ref, log)
         }
     }
 
-    /**
-     * 작품 목록 페이지에서 최신 회차를 읽는다.
-     * 목록을 못 열었거나 회차 링크가 없으면 null 을 돌려 다른 방법에 넘긴다.
-     */
     private fun checkByListPage(
         domain: SiteUrl.Domain,
         comic: Comic,
         ref: SiteUrl.Episode,
+        log: Log,
     ): Result? {
         val listPath = comic.listPath?.takeIf { it.isNotBlank() } ?: SiteUrl.guessListPath(ref)
-        if (listPath.isNullOrBlank()) return null
+        if (listPath.isNullOrBlank()) {
+            log.line("  목록 주소를 만들지 못함")
+            return null
+        }
+        val source = if (comic.listPath.isNullOrBlank()) "추측" else "직접 지정"
+        log.line("  목록 주소($source): ${SiteUrl.decodeUri(listPath)}")
 
-        val page = fetch(SiteUrl.buildUrl(domain, listPath), maxBytes = LIST_BYTES) ?: return null
-        if (page.status !in 200..299) return null
+        val url = SiteUrl.buildUrl(domain, listPath)
+        log.line("  요청: $url")
+        val page = fetch(url, LIST_BYTES, log = log) ?: return null
+        if (page.status !in 200..299) {
+            log.line("  → 목록 페이지 상태 ${page.status}")
+            return null
+        }
 
-        val latest = findLatest(page, ref) ?: return null
+        describeLinks(page, ref, log)
+        val latest = findLatest(page, ref)
+        if (latest == null) {
+            log.line("  → 목록에서 이 작품의 회차 링크를 못 찾음")
+            return null
+        }
+        log.line("  → 최신 ${latest.ep}화, 주소 ${SiteUrl.decodeUri(latest.path)}")
+        log.line("  → 결과: ${if (latest.ep > ref.ep) "새 회차 있음" else "최신"}")
         return Result(
             comic.id,
             if (latest.ep > ref.ep) NextStatus.YES else NextStatus.NO,
@@ -115,63 +143,64 @@ object EpisodeCheck {
     }
 
     /** 회차 숫자만 하나 올린 주소가 열리는지 본다. 본문은 받지 않는다. */
-    private fun checkByNextUrl(domain: SiteUrl.Domain, comic: Comic, ref: SiteUrl.Episode): Result {
+    private fun checkByNextUrl(
+        domain: SiteUrl.Domain,
+        comic: Comic,
+        ref: SiteUrl.Episode,
+        log: Log,
+    ): Result {
         val nextPath = SiteUrl.buildEpisodePath(ref, ref.ep + 1)
         val url = SiteUrl.buildUrl(domain, nextPath)
+        log.line("  다음 회차 주소 요청: $url")
 
-        // 모바일 회선은 첫 연결이 종종 끊긴다. 한 번은 다시 시도한다.
-        val page = fetch(url, maxBytes = 0) ?: fetch(url, maxBytes = 0)
-            ?: return Result(comic.id, NextStatus.FAILED, "접속하지 못했습니다 (시간 초과 또는 연결 끊김)")
+        val page = fetch(url, 0, log = log) ?: fetch(url, 0, log = log)
+        if (page == null) {
+            log.line("  → 두 번 다 접속 실패")
+            return Result(comic.id, NextStatus.FAILED, "접속하지 못했습니다 (시간 초과 또는 연결 끊김)")
+        }
 
         return when {
-            page.status == 404 || page.status == 410 -> Result(comic.id, NextStatus.NO, null)
-
+            page.status == 404 || page.status == 410 -> {
+                log.line("  → 없음. 결과: 최신")
+                Result(comic.id, NextStatus.NO, null)
+            }
             page.status == 200 -> {
-                // 없는 주소를 홈이나 목록으로 돌려보내는 사이트가 있다.
-                // 그런 경우 최종 주소가 요청한 파일이 아니게 된다.
                 val wanted = nextPath.substringAfterLast('/')
                 val landed = page.finalUrl?.substringAfterLast('/') ?: wanted
                 if (landed.equals(wanted, ignoreCase = true)) {
-                    Result(comic.id, NextStatus.YES, null)
+                    log.line("  → 있음. 결과: 새 회차 있음")
+                    Result(comic.id, NextStatus.YES, null, latestEp = ref.ep + 1, latestPath = nextPath)
                 } else {
+                    log.line("  → 다른 곳으로 넘어감($landed). 결과: 최신")
                     Result(comic.id, NextStatus.NO, null)
                 }
             }
-
-            else -> Result(comic.id, NextStatus.FAILED, "사이트가 ${page.status} 로 응답했습니다")
+            else -> {
+                log.line("  → 예상 밖 상태 ${page.status}")
+                Result(comic.id, NextStatus.FAILED, "사이트가 ${page.status} 로 응답했습니다")
+            }
         }
     }
 
-    /**
-     * 부제가 붙는 작품용. 주소를 지어낼 수 없으므로 보던 페이지의 링크를 훑는다.
-     * 회차 번호 앞부분까지만 맞춰보고 뒤의 숫자를 읽으므로 부제가 무엇이든 걸린다.
-     *
-     * 이 사이트는 광고가 많아 페이지가 무겁다. 이전/다음 링크는 문서 아래쪽에 있으니
-     * 먼저 끝부분만 요청해 본다. 서버가 구간 요청을 받아주지 않거나 거기서 링크를
-     * 못 찾으면 그때만 통째로 받는다.
-     */
-    private fun checkByLinks(domain: SiteUrl.Domain, comic: Comic, ref: SiteUrl.Episode): Result {
+    /** 주소를 지어낼 수 없는 작품용. 보던 페이지의 링크를 훑는다. */
+    private fun checkByLinks(
+        domain: SiteUrl.Domain,
+        comic: Comic,
+        ref: SiteUrl.Episode,
+        log: Log,
+    ): Result {
         val url = SiteUrl.buildUrl(domain, comic.path)
-
-        val tail = fetch(url, maxBytes = TAIL_BYTES, tailOnly = true)
-        findLatest(tail, ref)?.let {
-            return Result(
-                comic.id,
-                if (it.ep > ref.ep) NextStatus.YES else NextStatus.NO,
-                null,
-                latestEp = it.ep,
-                latestPath = it.path,
-            )
-        }
-
-        val whole = fetch(url, maxBytes = FULL_BYTES)
+        log.line("  보던 페이지 요청: $url")
+        val page = fetch(url, PAGE_BYTES, log = log)
             ?: return Result(comic.id, NextStatus.FAILED, "접속하지 못했습니다 (시간 초과 또는 연결 끊김)")
-        if (whole.status !in 200..299) {
-            return Result(comic.id, NextStatus.FAILED, "사이트가 ${whole.status} 로 응답했습니다")
+        if (page.status !in 200..299) {
+            return Result(comic.id, NextStatus.FAILED, "사이트가 ${page.status} 로 응답했습니다")
         }
 
-        val latest = findLatest(whole, ref)
+        describeLinks(page, ref, log)
+        val latest = findLatest(page, ref)
             ?: return Result(comic.id, NextStatus.FAILED, "페이지에서 회차 링크를 찾지 못했습니다")
+        log.line("  → 최신 ${latest.ep}화")
         return Result(
             comic.id,
             if (latest.ep > ref.ep) NextStatus.YES else NextStatus.NO,
@@ -179,6 +208,21 @@ object EpisodeCheck {
             latestEp = latest.ep,
             latestPath = latest.path,
         )
+    }
+
+    /** 링크를 못 찾았을 때 원인을 알 수 있도록 실제 모습을 남긴다. */
+    private fun describeLinks(page: Page, ref: SiteUrl.Episode, log: Log) {
+        val text = page.decodings().firstOrNull() ?: return
+        log.line("  href 개수: ${SiteUrl.countHrefs(text)}")
+        log.line("  찾는 접두사(디코딩): ${ref.before.substringAfterLast('/')}")
+        log.line("  찾는 접두사(인코딩): ${SiteUrl.encodeUri(ref.before).substringAfterLast('/')}")
+        val samples = SiteUrl.sampleEpisodeHrefs(text)
+        if (samples.isEmpty()) {
+            log.line("  회차 링크 표본: 없음")
+        } else {
+            log.line("  회차 링크 표본:")
+            for (h in samples) log.line("    $h")
+        }
     }
 
     private fun findLatest(page: Page?, ref: SiteUrl.Episode): SiteUrl.EpisodeLink? {
@@ -194,10 +238,6 @@ object EpisodeCheck {
         val contentType: String?,
         val finalUrl: String?,
     ) {
-        /**
-         * 문서에 적힌 인코딩이 실제와 다른 한국 사이트가 많다.
-         * 후보를 여러 개 만들어 그중 하나에서라도 회차가 잡히면 쓴다.
-         */
         fun decodings(): List<String> {
             val list = mutableListOf<String>()
             charsetOf(contentType)?.let { runCatching { list.add(String(body, it)) } }
@@ -213,7 +253,7 @@ object EpisodeCheck {
         return runCatching { charset(name) }.getOrNull()
     }
 
-    private fun fetch(url: String, maxBytes: Int, tailOnly: Boolean = false): Page? {
+    private fun fetch(url: String, maxBytes: Int, tailOnly: Boolean = false, log: Log): Page? {
         var conn: HttpURLConnection? = null
         return try {
             conn = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -223,15 +263,18 @@ object EpisodeCheck {
                 instanceFollowRedirects = true
                 setRequestProperty("User-Agent", UA)
                 setRequestProperty("Accept", "text/html,application/xhtml+xml")
-                // 뒤쪽만 달라고 요청한다. 서버가 안 받아주면 그냥 전체를 보내온다.
                 if (tailOnly) setRequestProperty("Range", "bytes=-$maxBytes")
             }
             val status = conn.responseCode
             val stream = if (status in 200..299) conn.inputStream else conn.errorStream
             val body = if (maxBytes > 0) stream?.use { read(it, maxBytes) } ?: ByteArray(0) else ByteArray(0)
             if (maxBytes == 0) runCatching { stream?.close() }
-            Page(status, body, conn.contentType, conn.url?.toString())
+            val finalUrl = conn.url?.toString()
+            log.line("  ← 상태 $status, ${body.size}바이트, 형식 ${conn.contentType ?: "?"}")
+            if (finalUrl != null && finalUrl != url) log.line("  ← 최종 주소 $finalUrl")
+            Page(status, body, conn.contentType, finalUrl)
         } catch (e: Exception) {
+            log.line("  ← 실패: ${e.javaClass.simpleName}: ${e.message}")
             null
         } finally {
             conn?.disconnect()

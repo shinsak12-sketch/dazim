@@ -270,4 +270,30 @@ object SiteUrl {
         if (name.isEmpty()) return null
         return "/" + encodeUri(name.replace('_', '-'))
     }
+
+    /**
+     * 페이지에서 회차 링크로 보이는 것 몇 개를 원본 그대로 뽑는다.
+     *
+     * 판정이 어긋났을 때 사이트가 링크를 실제로 어떤 형태로 주는지 봐야 고칠 수 있다.
+     * 짐작으로 고치면 또 빗나간다.
+     */
+    fun sampleEpisodeHrefs(html: String, limit: Int = 6): List<String> {
+        val hrefRe = Regex("""href\s*=\s*["']([^"'>]+)["']""", RegexOption.IGNORE_CASE)
+        val out = LinkedHashSet<String>()
+        for (m in hrefRe.findAll(html)) {
+            val href = m.groupValues[1].trim()
+            // 조건을 좁히면 정작 봐야 할 형태가 빠진다. "EP.078_약혼녀.html" 처럼
+            // 화 자도 없고 숫자로 끝나지도 않는 회차 주소가 실제로 있다.
+            val looksLikeEpisode = href.contains(".htm", ignoreCase = true) ||
+                href.contains("화") ||
+                href.contains("%ED%99%94", ignoreCase = true)
+            if (looksLikeEpisode) out.add(href)
+            if (out.size >= limit) break
+        }
+        return out.toList()
+    }
+
+    /** 페이지 안의 href 총 개수. 링크 자체를 못 읽은 것인지 구분하는 데 쓴다. */
+    fun countHrefs(html: String): Int =
+        Regex("""href\s*=\s*["']""", RegexOption.IGNORE_CASE).findAll(html).count()
 }
