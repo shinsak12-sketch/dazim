@@ -169,8 +169,11 @@ class WebEpisodeCheck(
                 else -> log.append("회차 링크를 찾지 못함")
             }
             log.append("  (상태 ${o.optInt("status", 0)}, ${o.optInt("size", 0)}바이트)\n")
-            o.optJSONArray("samples")?.let { s ->
-                for (k in 0 until s.length()) log.append("    표본: ${s.optString(k)}\n")
+            o.optString("needles", "").takeIf { it.isNotEmpty() }?.let {
+                log.append("    제목 발견 횟수: $it\n")
+            }
+            o.optString("around", "").takeIf { it.isNotEmpty() }?.let {
+                log.append("    주변: ${it.replace("\n", " ").take(280)}\n")
             }
             out.add(Outcome(id, ep, path, error))
         }
@@ -178,7 +181,14 @@ class WebEpisodeCheck(
     }
 
     /**
-     * 목록 페이지들을 가져와 이 작품의 회차 링크 중 가장 큰 번호를 찾는다.
+     * 목록 페이지들을 가져와 이 작품의 가장 큰 회차 번호를 찾는다.
+     *
+     * href 만 뒤지면 안 된다. 이 사이트는 회차를 링크 태그로 걸지 않아서
+     * 페이지 전체에 .html 링크가 거의 없다. 그래서 문서 전체에서 제목 뒤에
+     * 오는 숫자를 찾는다.
+     *
+     * 제목이 나타나는 형태가 셋이라 모두 본다. 주소에 인코딩된 형태,
+     * 주소에 한글 그대로인 형태, 그리고 화면에 보이는 글자(밑줄 대신 띄어쓰기).
      * 제목과 숫자 사이에 "EP." 같은 표시가 끼는 작품이 있어 짧은 글자는 건너뛴다.
      */
     private fun buildScript(tasks: JSONArray): String = """
@@ -201,34 +211,60 @@ class WebEpisodeCheck(
             return digits.length ? parseInt(digits, 10) : null;
           }
 
-          function scan(html, enc, dec) {
+          // 링크가 href 가 아니라 onclick 이나 data- 속성에 들어 있을 수 있다.
+          // 앞뒤로 가장 가까운 따옴표를 찾아 그 안의 값을 주소로 본다.
+          function quotedAround(html, at) {
+            var from = Math.max(0, at - 400);
+            var s = -1;
+            for (var i = at; i >= from; i--) {
+              var c = html.charAt(i);
+              if (c === '"' || c === "'") { s = i; break; }
+              if (c === "<" || c === ">") break;
+            }
+            if (s < 0) return null;
+            var q = html.charAt(s);
+            var e = html.indexOf(q, s + 1);
+            if (e < 0 || e - s > 500) return null;
+            var token = html.substring(s + 1, e);
+            if (token.indexOf(".htm") < 0 && token.charAt(0) !== "/") return null;
+            return token;
+          }
+
+          function scan(html, lower, needles) {
             var best = null;
-            var re = /href\s*=\s*["']([^"'>]+)["']/gi;
-            var m;
-            while ((m = re.exec(html)) !== null) {
-              var href = m[1];
-              var pairs = [[enc.toLowerCase(), href.toLowerCase()], [dec, href]];
-              for (var i = 0; i < pairs.length; i++) {
-                var needle = pairs[i][0], hay = pairs[i][1];
-                if (!needle) continue;
-                var at = hay.indexOf(needle);
-                if (at < 0) continue;
+            for (var i = 0; i < needles.length; i++) {
+              var needle = needles[i].n;
+              if (!needle) continue;
+              var hay = needles[i].lower ? lower : html;
+              var at = 0;
+              while ((at = hay.indexOf(needle, at)) !== -1) {
                 var v = numberAfter(hay, at, needle.length);
-                if (v !== null && (best === null || v > best.ep)) best = { ep: v, path: href };
-                break;
+                if (v !== null && (best === null || v > best.ep)) {
+                  best = { ep: v, path: quotedAround(html, at) };
+                }
+                at += needle.length;
               }
             }
             return best;
           }
 
-          function samples(html) {
-            var out = [];
-            var re = /href\s*=\s*["']([^"'>]+)["']/gi;
-            var m;
-            while ((m = re.exec(html)) !== null && out.length < 5) {
-              if (m[1].indexOf(".htm") >= 0) out.push(m[1]);
+          // 못 찾았을 때 무엇을 봤는지 남긴다. 짐작으로 고치면 또 빗나간다.
+          function diagnose(html, lower, needles, entry) {
+            var counts = [];
+            var firstAt = -1;
+            for (var i = 0; i < needles.length; i++) {
+              var needle = needles[i].n;
+              if (!needle) continue;
+              var hay = needles[i].lower ? lower : html;
+              var n = 0, at = 0;
+              while ((at = hay.indexOf(needle, at)) !== -1) { n++; at += needle.length; if (n > 50) break; }
+              counts.push(needles[i].label + "=" + n);
+              if (n > 0 && firstAt < 0) firstAt = hay.indexOf(needle);
             }
-            return out;
+            entry.needles = counts.join(", ");
+            if (firstAt >= 0) {
+              entry.around = html.substring(Math.max(0, firstAt - 120), firstAt + 160);
+            }
           }
 
           function record(entry) {
@@ -248,10 +284,16 @@ class WebEpisodeCheck(
             fetch(t.url, { credentials: "omit" })
               .then(function (r) { status = r.status; return r.text(); })
               .then(function (html) {
-                var best = scan(html, t.enc, t.dec);
+                var lower = html.toLowerCase();
+                var needles = [
+                  { n: t.enc.toLowerCase(), lower: true, label: "인코딩" },
+                  { n: t.dec, lower: false, label: "한글밑줄" },
+                  { n: t.dec.replace(/_/g, " "), lower: false, label: "화면글자" }
+                ];
+                var best = scan(html, lower, needles);
                 var e = { id: t.id, title: t.title, status: status, size: html.length };
-                if (best) { e.ep = best.ep; e.path = best.path; }
-                else { e.error = "회차 링크 없음"; e.samples = samples(html); }
+                if (best) { e.ep = best.ep; if (best.path) e.path = best.path; }
+                else { e.error = "회차 번호를 찾지 못함"; diagnose(html, lower, needles, e); }
                 record(e);
               })
               .catch(function (err) {
