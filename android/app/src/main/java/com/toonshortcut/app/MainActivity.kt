@@ -10,6 +10,8 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebView
+import android.widget.FrameLayout
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -33,6 +35,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var subtitleView: TextView
     private lateinit var checkButton: TextView
     private lateinit var swipe: SwipeRefreshLayout
+
+    /**
+     * 새 회차 확인에 쓰는 보이지 않는 WebView.
+     * 앱에서 직접 HTTP 로 요청하면 통신사가 연결을 끊어서, 확인도 브라우저
+     * 안에서 해야 한다.
+     */
+    private lateinit var hiddenWeb: WebView
     private var checking = false
 
     /**
@@ -160,7 +169,19 @@ class MainActivity : AppCompatActivity() {
 
         scroll.addView(root)
         swipe.addView(scroll)
-        return swipe
+
+        // 확인용 WebView 를 화면에 두되 눈에 띄지 않게 한다.
+        // 완전히 떼어두면 자바스크립트가 제대로 돌지 않는 기기가 있다.
+        hiddenWeb = WebView(this)
+        val frame = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
+        frame.addView(
+            swipe,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        frame.addView(hiddenWeb, FrameLayout.LayoutParams(1, 1))
+        return frame
     }
 
     private fun buildDomainCard(): View {
@@ -399,7 +420,10 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    /** 저장된 만화들에 다음 회차가 나왔는지 한 번에 확인한다. 결과는 끝나는 대로 하나씩 반영된다. */
+    /**
+     * 저장된 만화들에 다음 회차가 나왔는지 한 번에 확인한다.
+     * 브라우저 안에서 돌린다. 앱에서 직접 요청하면 통신사가 연결을 끊는다.
+     */
     private fun checkNewEpisodes(sortAfter: Boolean = false) {
         if (checking) {
             swipe.isRefreshing = false
@@ -412,39 +436,58 @@ class MainActivity : AppCompatActivity() {
             return
         }
         checking = true
-        var done = 0
-        val logs = StringBuilder()
         checkButton.isEnabled = false
         checkButton.text = "확인 중… 0/${comics.size}"
 
-        EpisodeCheck.checkAll(
-            store.domain,
+        WebEpisodeCheck(hiddenWeb, store.domain).start(
             comics,
-            onEach = { r ->
-                done++
-                store.setNext(r.comicId, r.status, r.note, r.latestEp, r.latestPath)
-                logs.append(r.log).append('\n')
-                checkButton.text = "확인 중… $done/${comics.size}"
-                render()
-            },
-            onDone = {
+            onProgress = { done, total -> checkButton.text = "확인 중… $done/$total" },
+            onDone = { outcomes, log ->
+                applyOutcomes(comics, outcomes)
                 checking = false
                 checkButton.isEnabled = true
                 checkButton.text = "새 회차 확인"
-                lastDiagnostics = buildDiagnostics(logs.toString())
                 swipe.isRefreshing = false
                 if (sortAfter) sortByNew = true
+                lastDiagnostics = buildDiagnostics(log)
                 render()
+
                 val list = store.comics
                 val failed = list.count { it.next == NextStatus.FAILED }
                 val noEp = list.count { it.next == NextStatus.NO_EPISODE }
                 when {
-                    failed > 0 && noEp > 0 -> toast("실패 ${failed}편 · 회차 없는 주소 ${noEp}편. 배지를 눌러 확인하세요.")
+                    failed > 0 && noEp > 0 -> toast("실패 ${failed}편 · 회차 없는 주소 ${noEp}편")
                     failed > 0 -> toast("${failed}편 실패. 배지를 누르면 이유가 나옵니다.")
                     noEp > 0 -> toast("${noEp}편은 주소에 회차 번호가 없습니다.")
                 }
             },
         )
+    }
+
+    private fun applyOutcomes(comics: List<Comic>, outcomes: List<WebEpisodeCheck.Outcome>) {
+        val byId = outcomes.associateBy { it.comicId }
+        for (c in comics) {
+            val ref = SiteUrl.parseEpisode(c.path)
+            val o = byId[c.id]
+            when {
+                ref == null ->
+                    store.setNext(c.id, NextStatus.NO_EPISODE, "주소에 회차 번호가 없습니다")
+                o == null ->
+                    store.setNext(c.id, NextStatus.FAILED, "확인하지 못했습니다")
+                o.error != null ->
+                    store.setNext(c.id, NextStatus.FAILED, o.error)
+                o.ep != null ->
+                    store.setNext(
+                        c.id,
+                        if (o.ep > ref.ep) NextStatus.YES else NextStatus.NO,
+                        null,
+                        o.ep,
+                        o.path,
+                    )
+                else ->
+                    store.setNext(c.id, NextStatus.FAILED, "회차 링크를 찾지 못했습니다")
+            }
+        }
     }
 
     // ------------------------------------------------------------------ 대화상자
