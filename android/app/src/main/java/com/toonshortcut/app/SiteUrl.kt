@@ -143,8 +143,13 @@ object SiteUrl {
     fun parseEpisode(path: String): Episode? {
         val decoded = decodeUri(path)
 
-        // 1순위: "266화" 처럼 숫자 뒤에 화/話/회 가 붙은 형태
-        Regex("(\\d+)(?=[화話회])").find(decoded)?.let { m ->
+        // 1순위: 회차 번호 바로 뒤에 오는 표시로 찾는다.
+        //
+        // "266화" 가 기본이지만 "314．제101장" 처럼 화 대신 온점을 쓰는 작품이 있다.
+        // 온점까지 넣어두면 그런 작품도 제목 바로 뒤의 번호를 집는다.
+        // 왼쪽부터 처음 걸리는 것을 쓰므로 "우주천마_3077_102화" 는 102 가 잡힌다.
+        // 3077 뒤에는 밑줄이 와서 표시에 해당하지 않기 때문이다.
+        Regex("(\\d+)(?=[화話회．.])").find(decoded)?.let { m ->
             val digits = m.groupValues[1]
             val idx = m.range.first
             return Episode(
@@ -155,14 +160,15 @@ object SiteUrl {
             )
         }
 
-        // 2순위: 파일명 쪽 마지막 숫자 (예: /view/1234, /episode-88.html)
+        // 2순위: 파일명 쪽 첫 숫자 (예: /view/1234)
+        //
+        // 마지막 숫자를 집으면 안 된다. 제목 뒤 괄호 번호나 부제 속 숫자를 회차로
+        // 오인하고, 그러면 제목 앞부분까지 어긋나 목록 주소가 통째로 깨진다.
         val lastSlash = decoded.lastIndexOf('/')
         val seg = decoded.substring(lastSlash + 1)
-        val matches = Regex("\\d+").findAll(seg).toList()
-        if (matches.isEmpty()) return null
-        val last = matches.last()
-        val idx = lastSlash + 1 + last.range.first
-        val digits = last.value
+        val first = Regex("\\d+").find(seg) ?: return null
+        val idx = lastSlash + 1 + first.range.first
+        val digits = first.value
         return Episode(
             before = decoded.substring(0, idx),
             ep = digits.toIntOrNull() ?: return null,
@@ -179,14 +185,23 @@ object SiteUrl {
 
     fun episodeLabel(path: String): String? = parseEpisode(path)?.let { "${it.ep}화" }
 
-    /** 경로에서 만화 제목을 추측한다. /나_혼자_..._266화.html → "나 혼자 ..." */
+    /**
+     * 경로에서 만화 제목을 추측한다.
+     *
+     * 회차 번호 앞까지만 쓴다. 뒤를 남기면 "사형집행관 19화 : 사형집행관" 처럼
+     * 회차와 부제가 제목에 섞인다. 부제는 회차마다 바뀌므로 제목이 될 수 없다.
+     */
     fun guessTitle(path: String): String {
-        var s = decodeUri(path)
-        s = s.substringBefore('?').substringBefore('#')
+        val ref = parseEpisode(path)
+        var s = if (ref != null) {
+            ref.before
+        } else {
+            decodeUri(path).substringBefore('?').substringBefore('#')
+                .replace(Regex("\\.(html?|php|aspx?|jsp)$", RegexOption.IGNORE_CASE), "")
+        }
         s = s.substring(s.lastIndexOf('/') + 1)
-        s = s.replace(Regex("\\.(html?|php|aspx?|jsp)$", RegexOption.IGNORE_CASE), "")
         s = s.replace(Regex("[_+]+"), " ").trim()
-        s = s.replace(Regex("\\s*\\d+\\s*화\\s*$"), "").trim()
+        s = s.trim('-', '.', ':', '·', ' ')
         return s.ifEmpty { "제목 없음" }
     }
 
