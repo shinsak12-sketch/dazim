@@ -175,13 +175,29 @@ class Store(context: Context) {
         val c = list.firstOrNull { it.id == id } ?: return
         if (title != null) c.title = title
         if (listPath != null) c.listPath = listPath.ifEmpty { null }
-        // 회차가 바뀌면 "다음 화가 있나"에 대한 이전 판정은 더 이상 맞지 않는다.
+
         if (path != null && path != c.path) {
+            // 작품이 아예 바뀌었는지 본다. 회차 번호 앞부분이 그 작품을 가리킨다.
+            val oldSeries = SiteUrl.parseEpisode(c.path)?.before
+            val newSeries = SiteUrl.parseEpisode(path)?.before
+
             c.path = path
+            // 회차가 바뀌면 "다음 화가 있나"에 대한 이전 판정은 더 이상 맞지 않는다.
             c.next = NextStatus.UNKNOWN
             c.nextNote = null
             c.latestEp = null
             c.latestPath = null
+
+            // 시즌이 넘어갔으면 예전 제목과 목록 주소는 더 이상 맞지 않는다.
+            // "사형집행관 1화"로 등록해두고 "사형집행관 시즌2"를 보면 옛것으로 남는다.
+            // 제목을 직접 지정한 경우(title 인자)는 건드리지 않는다.
+            if (oldSeries != null && newSeries != null && oldSeries != newSeries &&
+                SiteUrl.relatedSeries(oldSeries, newSeries)
+            ) {
+                if (title == null) c.title = SiteUrl.guessTitle(path)
+                // 목록 주소도 예전 작품 것이다. 비워두면 지금 주소에서 다시 뽑는다.
+                if (listPath == null) c.listPath = null
+            }
         }
         comics = list
     }

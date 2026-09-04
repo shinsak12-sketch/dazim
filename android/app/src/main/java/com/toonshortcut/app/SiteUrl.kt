@@ -186,6 +186,21 @@ object SiteUrl {
     fun episodeLabel(path: String): String? = parseEpisode(path)?.let { "${it.ep}화" }
 
     /**
+     * 두 회차 주소의 작품 부분이 같은 계열로 보이는지 본다.
+     *
+     * "사형집행관_" 과 "사형집행관_시즌2_" 는 앞글자를 길게 공유하니 같은 계열,
+     * "약혼녀_" 와 "EP." 는 아니다. 후자는 작품이 바뀐 게 아니라 사이트가 회차
+     * 표기를 통째로 바꾼 경우라서, 이걸 같은 계열로 보면 제목이 "EP" 로 덮어써진다.
+     */
+    fun relatedSeries(a: String, b: String): Boolean {
+        val x = decodeUri(a).substringAfterLast('/')
+        val y = decodeUri(b).substringAfterLast('/')
+        var i = 0
+        while (i < x.length && i < y.length && x[i] == y[i]) i++
+        return i >= 3
+    }
+
+    /**
      * 경로에서 만화 제목을 추측한다.
      *
      * 회차 번호 앞까지만 쓴다. 뒤를 남기면 "사형집행관 19화 : 사형집행관" 처럼

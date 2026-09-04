@@ -493,17 +493,36 @@ class MainActivity : AppCompatActivity() {
     // ------------------------------------------------------------------ 대화상자
 
     private fun showComicMenu(c: Comic) {
-        val items = arrayOf("수정", "위로", "아래로", "삭제")
+        val items = arrayOf("수정", "제목 새로 뽑기", "위로", "아래로", "삭제")
         AlertDialog.Builder(this)
             .setTitle(c.title)
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> showComicDialog(existing = c)
-                    1 -> { sortByNew = false; store.move(c.id, -1); render() }
-                    2 -> { sortByNew = false; store.move(c.id, 1); render() }
-                    3 -> confirmDelete(c)
+                    1 -> retitle(c)
+                    2 -> { sortByNew = false; store.move(c.id, -1); render() }
+                    3 -> { sortByNew = false; store.move(c.id, 1); render() }
+                    4 -> confirmDelete(c)
                 }
             }
+            .show()
+    }
+
+    /** 지금 주소를 기준으로 제목을 다시 뽑는다. 예전에 잘못 저장된 제목을 되살릴 때 쓴다. */
+    private fun retitle(c: Comic) {
+        val fresh = SiteUrl.guessTitle(c.path)
+        if (fresh == c.title) {
+            toast("이미 주소와 같은 제목입니다.")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("제목 새로 뽑기")
+            .setMessage("${c.title}\n  ↓\n$fresh")
+            .setPositiveButton("바꾸기") { _, _ ->
+                store.updateComic(c.id, title = fresh)
+                render()
+            }
+            .setNegativeButton("취소", null)
             .show()
     }
 
