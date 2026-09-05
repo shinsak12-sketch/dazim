@@ -188,15 +188,16 @@ class Store(context: Context) {
             c.latestEp = null
             c.latestPath = null
 
-            // 시즌이 넘어갔으면 예전 제목과 목록 주소는 더 이상 맞지 않는다.
-            // "사형집행관 1화"로 등록해두고 "사형집행관 시즌2"를 보면 옛것으로 남는다.
-            // 제목을 직접 지정한 경우(title 인자)는 건드리지 않는다.
-            if (oldSeries != null && newSeries != null && oldSeries != newSeries &&
-                SiteUrl.relatedSeries(oldSeries, newSeries)
+            // 시즌이 넘어갔으면 예전 제목은 더 이상 맞지 않는다.
+            // "사형집행관 1화"로 등록해두고 시즌2를 읽으면 제목만 옛것으로 남는다.
+            //
+            // 목록 주소는 건드리지 않는다. 이 사이트는 시즌이 갈려도 목록 페이지가
+            // 하나다. 게다가 직접 넣어둔 주소를 지워버리면 되던 것까지 망가진다.
+            // 제목을 직접 지정한 경우(title 인자)도 건드리지 않는다.
+            if (title == null && oldSeries != null && newSeries != null &&
+                oldSeries != newSeries && SiteUrl.relatedSeries(oldSeries, newSeries)
             ) {
-                if (title == null) c.title = SiteUrl.guessTitle(path)
-                // 목록 주소도 예전 작품 것이다. 비워두면 지금 주소에서 다시 뽑는다.
-                if (listPath == null) c.listPath = null
+                c.title = SiteUrl.guessTitle(path)
             }
         }
         comics = list

@@ -296,10 +296,22 @@ object SiteUrl {
      * 한 번 맞히면 계속 쓸 수 있다.
      */
     fun guessListPath(ref: Episode): String? {
-        val name = ref.before.substringAfterLast('/').trimEnd('_', '-', ' ')
+        var name = ref.before.substringAfterLast('/').trimEnd('_', '-', ' ')
+        // 시즌 표시는 작품 이름이 아니라 회차 제목의 일부다.
+        //
+        // "사형집행관 50화" 와 "사형집행관 시즌2 9화" 는 한 목록 페이지에 같이 있고,
+        // 그 주소는 /사형집행관 하나뿐이다. 시즌2 를 이름으로 치면 /사형집행관-시즌2
+        // 라는 없는 페이지를 찾게 되고, 그러면 확인이 통째로 빗나간다.
+        name = name.replace(SEASON_TAIL, "").trimEnd('_', '-', ' ')
         if (name.isEmpty()) return null
         return "/" + encodeUri(name.replace('_', '-'))
     }
+
+    /** 이름 끝에 붙는 시즌 표시. 앞에 구분자와 숫자가 있을 때만 뗀다. */
+    private val SEASON_TAIL = Regex(
+        """[_\- ]+(?:시즌\s*\d+|season\s*\d+|\d+부)$""",
+        RegexOption.IGNORE_CASE,
+    )
 
     /**
      * 페이지에서 회차 링크로 보이는 것 몇 개를 원본 그대로 뽑는다.
