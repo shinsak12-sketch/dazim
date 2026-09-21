@@ -21,8 +21,14 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # packages 를 적어주지 않으면 액션이 기본으로 "tools" 까지 받으려 한다.
+      # 그 패키지는 SDK 저장소에서 없어져서 설치가 실패한다(Failed to find package 'tools').
+      # 어차피 쓰지 않던 것이라 platform-tools 만 받는다. 플랫폼과 build-tools 는
+      # 러너에 이미 있거나 그레이들이 알아서 받는다.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       # 래퍼 jar(바이너리)를 저장소에 넣지 않기 위해 Gradle을 액션으로 받는다.
       - name: Set up Gradle
