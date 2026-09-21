@@ -25,7 +25,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import org.json.JSONArray
 import org.json.JSONObject
+import org.json.JSONTokener
 
 /**
  * 만화 사이트를 앱 안에서 직접 연다.
@@ -42,6 +44,39 @@ class ReaderActivity : AppCompatActivity() {
         const val EXTRA_EPISODE = "episode"
         /** 사이트가 알려준 주소로 바로 열 때. 번호만으로는 만들 수 없는 주소가 있다. */
         const val EXTRA_PATH = "path"
+
+        /**
+         * 페이지 안의 회차 주소를 모은다.
+         *
+         * a 태그만 보면 안 된다. 이 사이트는 회차를 onclick 이나 data- 속성에
+         * 넣어두기도 해서, 문서 전체에서 따옴표 안의 .html 주소도 같이 긁는다.
+         * 상대 주소는 a 요소에 넣었다 빼면 브라우저가 알아서 절대 주소로 만들어 준다.
+         */
+        private val JS_LINKS = """
+            (function () {
+              try {
+                var seen = {}, out = [];
+                function add(u) {
+                  if (!u) return;
+                  var a = document.createElement("a");
+                  a.href = u;
+                  var h = a.href;
+                  if (h.indexOf(location.origin) !== 0) return;
+                  if (seen[h]) return;
+                  seen[h] = 1;
+                  out.push(h);
+                }
+                var as = document.getElementsByTagName("a");
+                for (var i = 0; i < as.length; i++) add(as[i].getAttribute("href"));
+                var html = document.documentElement.outerHTML;
+                var re = /["'(]([^"'()\s<>]*\.html?)["')]/gi, m;
+                while ((m = re.exec(html)) !== null) add(m[1]);
+                return JSON.stringify(out);
+              } catch (e) {
+                return "[]";
+              }
+            })()
+        """.trimIndent()
     }
 
     private lateinit var store: Store
@@ -54,6 +89,13 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var errorText: TextView
 
     private var comicId: String = ""
+
+    /** 아래 바의 회차 넘기기 버튼. 다음 회차가 없으면 흐리게 둔다. */
+    private lateinit var flipButton: TextView
+
+    /** 지금 페이지에서 찾아낸 이웃 회차. (회차 번호, 주소) */
+    private var nextLink: Pair<Int, String>? = null
+    private var prevLink: Pair<Int, String>? = null
 
     private val comic: Comic?
         get() = store.comics.firstOrNull { it.id == comicId }
@@ -138,6 +180,17 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         bar.addView(softButton("☰") { showMenu() })
+
+        // 회차 넘기기. 사이트의 앞뒤 버튼은 페이지 한참 아래에 있어서
+        // 한 손으로 잡고 볼 때 닿지 않는다. 왼쪽 끝에 붙여 엄지가 닿게 한다.
+        // 눌러서 다음 화, 길게 눌러서 이전 화.
+        flipButton = softButton("다음화") { goNeighbor(forward = true) }.apply {
+            setOnLongClickListener {
+                goNeighbor(forward = false)
+                true
+            }
+        }
+        bar.addWithGap(flipButton, dp(6))
 
         val texts = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -434,6 +487,78 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    // ------------------------------------------------------------------ 회차 넘기기
+
+    /**
+     * 페이지 안에 있는 같은 작품의 회차 주소를 모아 바로 앞뒤 회차를 고른다.
+     *
+     * 회차 번호를 하나 올려서 주소를 만들면 안 된다. "209화 : 부제" 처럼 부제가
+     * 붙는 작품은 다음 회차의 부제를 알 수 없어서 주소가 통째로 어긋난다.
+     * 사이트가 실제로 걸어둔 주소를 쓰는 것만이 확실하다.
+     *
+     * 기준은 저장된 회차가 아니라 지금 열려 있는 회차다. 사이트 버튼으로 몇 화를
+     * 넘긴 뒤에 눌러도 그 자리에서 이어진다.
+     */
+    private fun scanNeighbors() {
+        val viewing = web.url?.let { SiteUrl.parseInput(it) }?.path
+        val ref = viewing?.let { SiteUrl.parseEpisode(it) }
+        if (ref == null) {
+            setNeighbors(null, null)
+            return
+        }
+
+        web.evaluateJavascript(JS_LINKS) { raw ->
+            val urls = parseJsStringArray(raw)
+            var next: Pair<Int, String>? = null
+            var prev: Pair<Int, String>? = null
+
+            for (url in urls) {
+                val path = SiteUrl.parseInput(url)?.path ?: continue
+                val ep = SiteUrl.parseEpisode(path) ?: continue
+                // 회차 번호 앞부분이 같아야 같은 작품이다. 뒷부분은 부제라서
+                // 회차마다 달라지므로 견주면 안 된다.
+                if (ep.before != ref.before) continue
+                if (ep.ep > ref.ep && (next == null || ep.ep < next!!.first)) next = ep.ep to url
+                if (ep.ep < ref.ep && (prev == null || ep.ep > prev!!.first)) prev = ep.ep to url
+            }
+            setNeighbors(next, prev)
+        }
+    }
+
+    private fun setNeighbors(next: Pair<Int, String>?, prev: Pair<Int, String>?) {
+        nextLink = next
+        prevLink = prev
+        if (!::flipButton.isInitialized) return
+        // 다음 회차가 없으면 눌러도 소용없다는 것을 보이게 한다.
+        flipButton.alpha = if (next != null) 1f else 0.4f
+        flipButton.text = if (next != null) "${next.first}화" else "다음화"
+    }
+
+    private fun goNeighbor(forward: Boolean) {
+        val link = if (forward) nextLink else prevLink
+        if (link == null) {
+            toast(
+                if (forward) "다음 회차가 아직 없습니다."
+                else "이전 회차를 찾지 못했습니다.",
+            )
+            return
+        }
+        setNeighbors(null, null)
+        web.loadUrl(link.second)
+    }
+
+    /** evaluateJavascript 결과는 JSON 문자열 안에 든 JSON 이라 두 번 푼다. */
+    private fun parseJsStringArray(raw: String?): List<String> {
+        if (raw == null) return emptyList()
+        return try {
+            val inner = JSONTokener(raw).nextValue() as? String ?: return emptyList()
+            val arr = JSONArray(inner)
+            (0 until arr.length()).map { arr.optString(it) }.filter { it.isNotEmpty() }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
     // ------------------------------------------------------------------ WebView
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -462,6 +587,9 @@ class ReaderActivity : AppCompatActivity() {
                 super.doUpdateVisitedHistory(view, url, isReload)
                 if (url != null) autoSaveEpisode(url)
                 refreshTitle()
+                // 페이지가 바뀌면 이전 페이지에서 찾아둔 주소는 버린다.
+                // 남겨두면 엉뚱한 회차로 건너뛴다.
+                setNeighbors(null, null)
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
@@ -470,6 +598,7 @@ class ReaderActivity : AppCompatActivity() {
                 if (url != null) autoSaveEpisode(url)
                 refreshTitle()
                 refreshNextFromPage()
+                scanNeighbors()
             }
 
             override fun onReceivedError(
