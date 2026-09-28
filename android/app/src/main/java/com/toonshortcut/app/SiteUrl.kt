@@ -109,23 +109,41 @@ object SiteUrl {
     data class Parsed(val domain: Domain?, val path: String)
 
     /** 붙여넣은 문자열(전체 주소 또는 경로만)을 도메인과 경로로 나눈다. */
+    private val SCHEME = Regex("""^[A-Za-z][A-Za-z0-9+.-]*://""")
+
+    /**
+     * 붙여넣은 문자열(전체 주소 또는 경로만)을 도메인과 경로로 나눈다.
+     *
+     * java.net.URI 로 쪼개면 안 된다. 경로에 [ ] { } | 공백 같은 글자가 하나라도
+     * 있으면 예외를 던지고, 그러면 이 함수가 null 을 돌려준다. 저장, 회차 자동
+     * 저장, 회차 넘기기, 제목 표시가 모두 이 함수를 거치므로 그 회차에서는
+     * 앱이 통째로 먹통이 된다. "절대검감 198화 : 반시[般屍]" 처럼 대괄호가 든
+     * 부제가 실제로 있고, 브라우저는 그런 글자를 인코딩하지 않고 그대로 준다.
+     *
+     * 그래서 직접 쪼갠다. 인코딩은 건드리지 않고 원본 그대로 넘긴다.
+     */
     fun parseInput(input: String): Parsed? {
         val s = input.trim()
         if (s.isEmpty()) return null
         if (s.startsWith("/")) return Parsed(null, s)
 
-        val withScheme = if (Regex("^https?://", RegexOption.IGNORE_CASE).containsMatchIn(s)) s else "https://$s"
-        val uri = try {
-            java.net.URI(withScheme)
-        } catch (e: Exception) {
-            return null
+        var rest = s
+        SCHEME.find(rest)?.let { rest = rest.substring(it.value.length) }
+
+        // 호스트는 첫 / ? # 앞까지다.
+        val cut = rest.indexOfFirst { it == '/' || it == '?' || it == '#' }
+        val authority = if (cut >= 0) rest.substring(0, cut) else rest
+        val tail = if (cut >= 0) rest.substring(cut) else ""
+
+        // user:pass@host:port 에서 호스트만 남긴다.
+        val host = authority.substringAfterLast('@').substringBefore(':')
+        if (host.isEmpty()) return null
+
+        val path = when {
+            tail.isEmpty() -> "/"
+            tail.startsWith("/") -> tail
+            else -> "/$tail" // ?질의 나 #조각 만 있는 경우
         }
-        val host = uri.host ?: return null
-        // getRawPath 로 원본 인코딩을 보존한다. getPath 를 쓰면 디코딩돼 버린다.
-        val raw = uri.rawPath ?: ""
-        val query = uri.rawQuery?.let { "?$it" } ?: ""
-        val frag = uri.rawFragment?.let { "#$it" } ?: ""
-        val path = (if (raw.isEmpty()) "/" else raw) + query + frag
         return Parsed(parseHost(host), path)
     }
 
