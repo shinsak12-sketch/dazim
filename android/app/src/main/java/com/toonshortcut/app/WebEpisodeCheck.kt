@@ -169,6 +169,13 @@ class WebEpisodeCheck(
                 else -> log.append("회차 링크를 찾지 못함")
             }
             log.append("  (상태 ${o.optInt("status", 0)}, ${o.optInt("size", 0)}바이트)\n")
+            // 실패했을 때는 어느 주소를 두드렸는지가 가장 중요한 단서다.
+            // 이게 없으면 404 를 보고도 주소를 짐작해야 한다.
+            if (error != null || ep == null) {
+                o.optString("url", "").takeIf { it.isNotEmpty() }?.let {
+                    log.append("    목록 주소: ${SiteUrl.decodeUri(it)}\n")
+                }
+            }
             o.optString("needles", "").takeIf { it.isNotEmpty() }?.let {
                 log.append("    제목 발견 횟수: $it\n")
             }
@@ -291,13 +298,13 @@ class WebEpisodeCheck(
                   { n: t.dec.replace(/_/g, " "), lower: false, label: "화면글자" }
                 ];
                 var best = scan(html, lower, needles);
-                var e = { id: t.id, title: t.title, status: status, size: html.length };
+                var e = { id: t.id, title: t.title, url: t.url, status: status, size: html.length };
                 if (best) { e.ep = best.ep; if (best.path) e.path = best.path; }
                 else { e.error = "회차 번호를 찾지 못함"; diagnose(html, lower, needles, e); }
                 record(e);
               })
               .catch(function (err) {
-                record({ id: t.id, title: t.title, status: status, size: 0,
+                record({ id: t.id, title: t.title, url: t.url, status: status, size: 0,
                          error: String((err && err.message) || err) });
               });
           }

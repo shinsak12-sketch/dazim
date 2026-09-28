@@ -216,6 +216,7 @@ object SiteUrl {
         }
         s = s.substring(s.lastIndexOf('/') + 1)
         s = s.replace(Regex("[_+]+"), " ").trim()
+        s = stripEpisodeMarker(s)
         s = s.trim('-', '.', ':', '·', ' ')
         return s.ifEmpty { "제목 없음" }
     }
@@ -303,6 +304,7 @@ object SiteUrl {
         // 그 주소는 /사형집행관 하나뿐이다. 시즌2 를 이름으로 치면 /사형집행관-시즌2
         // 라는 없는 페이지를 찾게 되고, 그러면 확인이 통째로 빗나간다.
         name = name.replace(SEASON_TAIL, "").trimEnd('_', '-', ' ')
+        name = stripEpisodeMarker(name).trimEnd('_', '-', ' ')
         if (name.isEmpty()) return null
         return "/" + encodeUri(name.replace('_', '-'))
     }
@@ -312,6 +314,20 @@ object SiteUrl {
         """[_\- ]+(?:시즌\s*\d+|season\s*\d+|\d+부)$""",
         RegexOption.IGNORE_CASE,
     )
+
+    /**
+     * 이름 끝에 남은 회차 번호 표시. 앞에 구분자가 있을 때만 뗀다.
+     *
+     * "멸망 이후의 세계 제42화" 의 "제", "… 기갑 소환 EP.15화" 의 "EP." 는 작품
+     * 이름이 아니라 회차 번호 앞에 붙는 말이다. 남겨두면 /멸망-이후의-세계-제
+     * 같은 없는 목록 주소가 나와서 404 가 된다.
+     *
+     * 구분자를 요구하는 것이 핵심이다. 그냥 끝의 "제" 를 떼면 "신마대제" 가
+     * "신마대" 가 되어 멀쩡하던 작품이 깨진다.
+     */
+    private val EPISODE_MARKER_TAIL = Regex("""[_\-. ]+(?:제|[Ee][Pp]\.?)$""")
+
+    private fun stripEpisodeMarker(name: String): String = name.replace(EPISODE_MARKER_TAIL, "")
 
     /**
      * 페이지에서 회차 링크로 보이는 것 몇 개를 원본 그대로 뽑는다.
