@@ -235,7 +235,7 @@ object SiteUrl {
         s = s.substring(s.lastIndexOf('/') + 1)
         s = s.replace(Regex("[_+]+"), " ").trim()
         s = stripEpisodeMarker(s)
-        s = s.trim('-', '.', ':', '·', ' ')
+        s = s.trim('-', '.', '．', ':', '·', ' ')
         return s.ifEmpty { "제목 없음" }
     }
 
@@ -343,7 +343,11 @@ object SiteUrl {
      * 구분자를 요구하는 것이 핵심이다. 그냥 끝의 "제" 를 떼면 "신마대제" 가
      * "신마대" 가 되어 멀쩡하던 작품이 깨진다.
      */
-    private val EPISODE_MARKER_TAIL = Regex("""[_\-. ]+(?:제|[Ee][Pp]\.?)$""")
+    //
+    // 마침표는 두 가지를 다 받는다. 이 사이트는 전각 마침표(．U+FF0E)를 쓴다.
+    // "EP．16화", "나노마신 325．" 가 그렇다. ASCII 마침표만 보면 "EP．" 가
+    // 그대로 남아서 /…-소환-EP． 라는 없는 주소가 된다.
+    private val EPISODE_MARKER_TAIL = Regex("""[_\-.． ]+(?:제|[Ee][Pp][.．]?)$""")
 
     private fun stripEpisodeMarker(name: String): String = name.replace(EPISODE_MARKER_TAIL, "")
 
