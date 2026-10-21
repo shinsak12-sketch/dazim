@@ -113,8 +113,15 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         // 목록에서 새 회차로 바로 들어온 경우 그 회차부터 연다.
+        //
+        // 사이트가 알려준 주소가 있으면 그것을 쓴다. 주소 끝에 해시가 붙는
+        // 작품이 있어서("71화-22a5af") 회차 번호만으로는 주소를 만들 수 없다.
+        // 번호로 만드는 쪽은 그런 주소가 없을 때의 대비책이다.
+        val exactPath = intent.getStringExtra(EXTRA_PATH)
         val jumpTo = intent.getIntExtra(EXTRA_EPISODE, -1)
-        if (jumpTo > 0) {
+        if (!exactPath.isNullOrBlank()) {
+            if (exactPath != comic?.path) store.updateComic(comicId, path = exactPath)
+        } else if (jumpTo > 0) {
             val ref = comic?.let { SiteUrl.parseEpisode(it.path) }
             if (ref != null && ref.ep != jumpTo) {
                 store.updateComic(comicId, path = SiteUrl.buildEpisodePath(ref, jumpTo))
@@ -362,8 +369,8 @@ class ReaderActivity : AppCompatActivity() {
         val c = comic ?: return
         val old = SiteUrl.parseEpisode(c.path)
         val new = SiteUrl.parseEpisode(parsed.path)
-        val differentSeries =
-            old != null && new != null && (old.before != new.before || old.after != new.after)
+        // autoSaveEpisode 와 같은 기준. 꼬리는 회차마다 달라지므로 견주지 않는다.
+        val differentSeries = old != null && new != null && old.before != new.before
 
         if (differentSeries) {
             AlertDialog.Builder(this)
@@ -417,7 +424,12 @@ class ReaderActivity : AppCompatActivity() {
         val parsed = SiteUrl.parseInput(url) ?: return
         val old = SiteUrl.parseEpisode(c.path) ?: return
         val new = SiteUrl.parseEpisode(parsed.path) ?: return
-        if (old.before != new.before || old.after != new.after) return // 다른 작품
+        // 회차 번호 앞부분만 견준다. 뒷부분은 같은 작품이라도 회차마다 달라진다.
+        // 부제가 붙기도 하고("209화 : 부제"), 사이트가 주소 끝에 해시를 붙이기도
+        // 한다("71화-22a5af"). 뒷부분까지 같아야 한다고 하면 그런 회차를 전부
+        // 다른 작품으로 보고 저장을 조용히 건너뛴다. 그러면 다 읽은 회차인데도
+        // 목록에 "새 회차" 가 영영 남는다.
+        if (old.before != new.before) return // 다른 작품
         if (old.ep == new.ep) return
 
         store.updateComic(comicId, path = parsed.path)
