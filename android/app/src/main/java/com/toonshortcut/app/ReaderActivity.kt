@@ -1,6 +1,9 @@
 package com.toonshortcut.app
 
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -28,6 +31,9 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 만화 사이트를 앱 안에서 직접 연다.
@@ -74,6 +80,77 @@ class ReaderActivity : AppCompatActivity() {
                 return JSON.stringify(out);
               } catch (e) {
                 return "[]";
+              }
+            })()
+        """.trimIndent()
+
+        /**
+         * 지금 페이지에 걸린 링크를 진단용으로 모은다.
+         *
+         * 목록 주소를 짐작하지 않고 사이트의 목록 버튼에서 읽어오려면, 그 버튼이
+         * HTML 에서 어떻게 생겼는지부터 봐야 한다. 글자 없이 아이콘만 있을 수 있어서
+         * 안쪽 HTML 과 감싼 요소까지 남긴다. 다른 사이트(광고) 링크는 개수만 센다.
+         */
+        private val JS_PAGE_DUMP = """
+            (function () {
+              try {
+                function txt(el, n) { return (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, n); }
+                function cls(el) {
+                  return (el && typeof el.className === "string") ? el.className.trim().slice(0, 60) : "";
+                }
+                function chain(el) {
+                  var out = [], p = el.parentElement, k = 0;
+                  while (p && k < 3) {
+                    var s = p.tagName.toLowerCase();
+                    if (p.id) s += "#" + p.id;
+                    var c = cls(p);
+                    if (c) s += "." + c.replace(/\s+/g, ".");
+                    out.push(s);
+                    p = p.parentElement;
+                    k++;
+                  }
+                  return out.join(" < ");
+                }
+                var anchors = [], other = 0, seen = {};
+                var as = document.getElementsByTagName("a");
+                for (var i = 0; i < as.length; i++) {
+                  var a = as[i];
+                  var raw = a.getAttribute("href") || "";
+                  var abs = a.href || raw;
+                  if (/^https?:/i.test(abs) && abs.indexOf(location.origin) !== 0) { other++; continue; }
+                  var key = abs + "|" + txt(a, 30);
+                  if (seen[key]) continue;
+                  seen[key] = 1;
+                  if (anchors.length >= 250) continue;
+                  anchors.push({
+                    h: raw.slice(0, 300),
+                    a: abs.slice(0, 300),
+                    t: txt(a, 60),
+                    c: cls(a),
+                    i: a.id || "",
+                    l: (a.getAttribute("title") || a.getAttribute("aria-label") || "").slice(0, 60),
+                    k: a.innerHTML.replace(/\s+/g, " ").trim().slice(0, 120),
+                    p: chain(a)
+                  });
+                }
+                var clicks = [];
+                var all = document.querySelectorAll("[onclick]");
+                for (var j = 0; j < all.length && clicks.length < 50; j++) {
+                  var e = all[j];
+                  clicks.push({
+                    g: e.tagName.toLowerCase(),
+                    c: cls(e),
+                    o: (e.getAttribute("onclick") || "").slice(0, 200),
+                    t: txt(e, 40),
+                    p: chain(e)
+                  });
+                }
+                return JSON.stringify({
+                  url: location.href, title: document.title,
+                  anchors: anchors, clicks: clicks, other: other, total: as.length
+                });
+              } catch (err) {
+                return JSON.stringify({ error: String(err) });
               }
             })()
         """.trimIndent()
@@ -299,6 +376,7 @@ class ReaderActivity : AppCompatActivity() {
             "주소 번호 직접 입력",
             if (auto) "회차 자동 저장 끄기 (지금 켜짐)" else "회차 자동 저장 켜기 (지금 꺼짐)",
             "브라우저로 열기",
+            "이 페이지 진단 기록 복사",
         )
         AlertDialog.Builder(this)
             .setItems(items) { _, which ->
@@ -312,6 +390,7 @@ class ReaderActivity : AppCompatActivity() {
                         refreshTitle()
                     }
                     4 -> openInBrowser()
+                    5 -> copyPageDiagnostics()
                 }
             }
             .show()
@@ -569,6 +648,120 @@ class ReaderActivity : AppCompatActivity() {
         } catch (e: Exception) {
             emptyList()
         }
+    }
+
+    // ------------------------------------------------------------------ 페이지 진단
+
+    /**
+     * 지금 보는 페이지에 걸린 링크를 모아 클립보드에 넣는다.
+     *
+     * 목록 주소를 회차 주소에서 짐작해 만들면 사이트가 이름 짓는 방식이 바뀔
+     * 때마다 빗나간다(시즌2, 제, EP．, 1부 후기). 사이트 아래쪽의 목록 버튼에서
+     * 진짜 주소를 읽어오는 쪽으로 바꾸려는데, 그 버튼의 생김새를 모르면 또
+     * 짐작이 된다. 먼저 실제 모양을 받아본다.
+     */
+    private fun copyPageDiagnostics() {
+        web.evaluateJavascript(JS_PAGE_DUMP) { raw ->
+            val json = try {
+                (JSONTokener(raw ?: "").nextValue() as? String)?.let { JSONObject(it) }
+            } catch (e: Exception) {
+                null
+            }
+            if (json == null) {
+                toast("페이지를 읽지 못했습니다. 페이지가 다 열린 뒤 다시 해보세요.")
+                return@evaluateJavascript
+            }
+            val text = buildPageDiagnostics(json)
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            if (cm == null) {
+                toast("클립보드를 쓸 수 없습니다.")
+                return@evaluateJavascript
+            }
+            cm.setPrimaryClip(ClipData.newPlainText("만화 바로가기 페이지 진단", text))
+            toast("복사했습니다 (${text.length}자). 붙여넣기 하세요.")
+        }
+    }
+
+    private fun buildPageDiagnostics(json: JSONObject): String {
+        val c = comic
+        val ref = c?.let { SiteUrl.parseEpisode(it.path) }
+        // 링크 주소에 작품 이름이 들어 있는지 보려고 쓴다. 밑줄, 하이픈, 띄어쓰기
+        // 어느 쪽으로 적혀 있어도 걸리게 세 가지를 다 만든다.
+        val name = ref?.before?.substringAfterLast('/')?.trimEnd('_', '-', ' ', '.', '．').orEmpty()
+        val nameForms = if (name.isEmpty()) emptyList() else {
+            listOf(name, name.replace('_', '-'), name.replace('_', ' ')).distinct()
+        }
+        val version = runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName
+        }.getOrNull() ?: "?"
+        val now = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.KOREA).format(Date())
+        val guessed = ref?.let { SiteUrl.guessListPath(it) }?.let { SiteUrl.decodeUri(it) }
+
+        val text = buildString {
+            appendLine("만화 바로가기 페이지 진단")
+            appendLine("앱 버전: $version")
+            appendLine("시각: $now")
+            appendLine("현재 주소: ${SiteUrl.buildHost(store.domain)}")
+            appendLine("만화: ${c?.title ?: "?"}")
+            appendLine("저장된 회차: ${c?.path?.let { SiteUrl.decodeUri(it) } ?: "?"}")
+            val savedList = c?.listPath?.let { SiteUrl.decodeUri(it) }
+            appendLine("저장된 목록 주소: ${savedList ?: "(없음. 짐작하면 $guessed)"}")
+            if (json.has("error")) {
+                appendLine("페이지 읽기 오류: ${json.optString("error")}")
+                return@buildString
+            }
+            appendLine("보는 페이지: ${SiteUrl.decodeUri(json.optString("url"))}")
+            appendLine("페이지 제목: ${json.optString("title")}")
+            val anchors = json.optJSONArray("anchors") ?: JSONArray()
+            appendLine(
+                "링크: 전체 ${json.optInt("total")}개 중 이 사이트 ${anchors.length()}개" +
+                    " (다른 사이트 ${json.optInt("other")}개는 뺌)",
+            )
+            appendLine("=".repeat(50))
+            appendLine()
+            appendLine("[이 사이트 링크]")
+            for (i in 0 until anchors.length()) {
+                val a = anchors.optJSONObject(i) ?: continue
+                val abs = a.optString("a")
+                val path = if (abs.startsWith("http", ignoreCase = true)) SiteUrl.parseInput(abs)?.path else null
+                val shown = path?.let { SiteUrl.decodeUri(it) } ?: abs
+                val ep = path?.let { SiteUrl.parseEpisode(it) }
+                val hasName = path != null && nameForms.any { shown.contains(it) }
+                val tag = when {
+                    ep != null && ref != null && ep.before == ref.before -> "회차 ${ep.ep} · 같은 작품"
+                    ep != null -> "회차 ${ep.ep}"
+                    hasName -> "★ 회차 없음 · 작품 이름 포함"
+                    else -> "회차 없음"
+                }
+                appendLine("${i + 1}. [$tag] $shown")
+                val rawHref = a.optString("h")
+                if (rawHref.isNotEmpty() && !rawHref.startsWith("/") && !rawHref.startsWith("http", ignoreCase = true)) {
+                    appendLine("    href: $rawHref")
+                }
+                val t = a.optString("t")
+                if (t.isNotEmpty()) appendLine("    글자: $t")
+                a.optString("l").takeIf { it.isNotEmpty() }?.let { appendLine("    설명: $it") }
+                val cls = a.optString("c")
+                val id = a.optString("i")
+                if (cls.isNotEmpty() || id.isNotEmpty()) appendLine("    class=$cls id=$id")
+                a.optString("k").takeIf { it.isNotEmpty() && it != t }?.let { appendLine("    안: $it") }
+                a.optString("p").takeIf { it.isNotEmpty() }?.let { appendLine("    위치: $it") }
+            }
+            val clicks = json.optJSONArray("clicks") ?: JSONArray()
+            if (clicks.length() > 0) {
+                appendLine()
+                appendLine("[onclick 이 걸린 요소]")
+                for (i in 0 until clicks.length()) {
+                    val e = clicks.optJSONObject(i) ?: continue
+                    appendLine("${i + 1}. <${e.optString("g")}> ${e.optString("o")}")
+                    e.optString("t").takeIf { it.isNotEmpty() }?.let { appendLine("    글자: $it") }
+                    e.optString("c").takeIf { it.isNotEmpty() }?.let { appendLine("    class=$it") }
+                    e.optString("p").takeIf { it.isNotEmpty() }?.let { appendLine("    위치: $it") }
+                }
+            }
+        }
+        // 링크가 아주 많은 페이지도 있어서 붙여넣을 수 있는 크기로 자른다.
+        return if (text.length > 80_000) text.take(80_000) + "\n…(잘림)" else text
     }
 
     // ------------------------------------------------------------------ WebView
