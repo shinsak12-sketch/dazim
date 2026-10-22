@@ -351,6 +351,37 @@ object SiteUrl {
 
     private fun stripEpisodeMarker(name: String): String = name.replace(EPISODE_MARKER_TAIL, "")
 
+    // ---------------------------------------------------------------- 목록 버튼
+
+    /**
+     * 회차 페이지 아래쪽 바의 목록 버튼.
+     *
+     * 목록 주소를 회차 주소에서 짐작하면 사이트가 이름 짓는 방식이 바뀔 때마다
+     * 빗나갔다(시즌2, 제, EP., EP．, 1부 후기). 사이트가 직접 걸어둔 이 링크를
+     * 읽으면 짐작할 일이 없다. 페이지 진단 기록으로 실제 모양을 확인했다.
+     *
+     *   <div class="bottom-navbar tkbn"><div class="container"><div class="toon-nav">
+     *     <a class="tkbn-b tkbn-list" title="목록" href="/오늘만-사는-기사">
+     *
+     * "1부 후기 3화" 를 보는 중이어도 이 링크는 /오늘만-사는-기사 를 가리킨다.
+     * class 이름이 바뀌어도 걸리도록 "목록" 설명이 붙은 링크를 대비책으로 둔다.
+     */
+    const val LIST_LINK_SELECTOR =
+        "a.tkbn-list, .toon-nav a[title='목록'], .toon-nav a[aria-label='목록'], " +
+            ".bottom-navbar a[title='목록'], .bottom-navbar a[aria-label='목록']"
+
+    /**
+     * 목록 버튼의 링크를 저장하는 형태(인코딩된 경로)로 맞춘다. 쓸 수 없으면 null.
+     * 절대 주소와 "/…" 경로를 둘 다 받는다. 호스트는 버린다. 번호가 자주 바뀐다.
+     */
+    fun listPathFromHref(href: String): String? {
+        val h = href.trim()
+        if (h.isEmpty() || h.startsWith("#") || h.startsWith("javascript:", ignoreCase = true)) return null
+        val path = parseInput(h)?.path?.substringBefore('#') ?: return null
+        if (path.isEmpty() || path == "/") return null
+        return encodeUri(decodeUri(path))
+    }
+
     /**
      * 페이지에서 회차 링크로 보이는 것 몇 개를 원본 그대로 뽑는다.
      *

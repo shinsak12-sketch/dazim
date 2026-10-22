@@ -91,6 +91,25 @@ class ReaderActivity : AppCompatActivity() {
          * HTML 에서 어떻게 생겼는지부터 봐야 한다. 글자 없이 아이콘만 있을 수 있어서
          * 안쪽 HTML 과 감싼 요소까지 남긴다. 다른 사이트(광고) 링크는 개수만 센다.
          */
+        /**
+         * 사이트 아래쪽 바의 목록 버튼 주소를 읽는다. 없으면 빈 문자열.
+         * 다른 사이트를 가리키거나 지금 페이지 자신을 가리키면 버린다.
+         */
+        private val JS_LIST_LINK = """
+            (function () {
+              try {
+                var a = document.querySelector(${JSONObject.quote(SiteUrl.LIST_LINK_SELECTOR)});
+                if (!a) return "";
+                var u = new URL(a.getAttribute("href") || "", location.href);
+                if (u.origin !== location.origin) return "";
+                if (u.pathname === "/" || u.pathname === location.pathname) return "";
+                return u.pathname + u.search;
+              } catch (e) {
+                return "";
+              }
+            })()
+        """.trimIndent()
+
         private val JS_PAGE_DUMP = """
             (function () {
               try {
@@ -578,6 +597,46 @@ class ReaderActivity : AppCompatActivity() {
         }
     }
 
+    // ------------------------------------------------------------------ 목록 주소
+
+    /**
+     * 사이트의 목록 버튼에서 이 만화의 목록 주소를 읽어 저장한다.
+     *
+     * 짐작해서 만든 목록 주소는 사이트가 이름 짓는 방식이 바뀔 때마다 빗나갔다.
+     * 사이트가 직접 걸어둔 링크라 이쪽이 진짜다. 직접 넣어둔 값이 있어도 다르면
+     * 이것으로 바꾼다.
+     *
+     * 다른 작품 페이지에 있으면 그 작품의 목록이므로 이 만화에 넣지 않는다.
+     * 페이지가 다 열린 직후에 버튼이 아직 안 그려졌을 수 있어 한 번 더 본다.
+     */
+    private fun captureListLink(retry: Boolean = true) {
+        // 다시 보기 전에 화면을 닫았으면 WebView 는 이미 정리됐다.
+        if (isFinishing || isDestroyed) return
+        val c = comic ?: return
+        val viewing = web.url?.let { SiteUrl.parseInput(it) }?.path ?: return
+        val viewingRef = SiteUrl.parseEpisode(viewing) ?: return
+        val savedRef = SiteUrl.parseEpisode(c.path) ?: return
+        if (viewingRef.before != savedRef.before) return
+
+        web.evaluateJavascript(JS_LIST_LINK) { raw ->
+            if (isFinishing || isDestroyed) return@evaluateJavascript
+            val href = try {
+                JSONTokener(raw ?: "").nextValue() as? String
+            } catch (e: Exception) {
+                null
+            }
+            val listPath = href?.let { SiteUrl.listPathFromHref(it) }
+            if (listPath == null) {
+                if (retry) web.postDelayed({ captureListLink(retry = false) }, 2000)
+                return@evaluateJavascript
+            }
+            val cur = comic ?: return@evaluateJavascript
+            if (cur.listPath == listPath) return@evaluateJavascript
+            store.updateComic(comicId, listPath = listPath)
+            toast("목록 주소 저장: ${SiteUrl.decodeUri(listPath)}")
+        }
+    }
+
     // ------------------------------------------------------------------ 회차 넘기기
 
     /**
@@ -804,6 +863,7 @@ class ReaderActivity : AppCompatActivity() {
                 refreshTitle()
                 refreshNextFromPage()
                 scanNeighbors()
+                captureListLink()
             }
 
             override fun onReceivedError(

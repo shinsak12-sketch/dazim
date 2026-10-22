@@ -469,6 +469,10 @@ class MainActivity : AppCompatActivity() {
         for (c in comics) {
             val ref = SiteUrl.parseEpisode(c.path)
             val o = byId[c.id]
+            // 사이트의 목록 버튼에서 읽어 온 주소는 저장해 둔다. 다음부터는 짐작하지
+            // 않고 이 주소로 바로 간다.
+            val found = o?.listPath
+            if (found != null && found != c.listPath) store.updateComic(c.id, listPath = found)
             when {
                 ref == null ->
                     store.setNext(c.id, NextStatus.NO_EPISODE, "주소에 회차 번호가 없습니다")

@@ -33,14 +33,27 @@ class WebEpisodeCheck(
         val ep: Int?,
         val path: String?,
         val error: String?,
+        /** 사이트의 목록 버튼에서 새로 읽어 온 목록 주소. 저장해 두면 다음부터 그대로 쓴다. */
+        val listPath: String? = null,
     )
 
     private val main = Handler(Looper.getMainLooper())
     private var finished = false
+    /** 기준 페이지가 한 번이라도 열렸는지. 못 열었을 때만 그쪽 시간 제한을 적용한다. */
+    private var baseLoaded = false
+    /** 지금까지 끝난 결과. 시간이 다 돼도 여기까지는 살린다. */
+    private var lastResults: JSONArray? = null
 
     private companion object {
-        /** 목록 페이지 하나를 가져오는 데 걸어줄 최대 시간 */
-        const val TOTAL_TIMEOUT_MS = 120_000L
+        /**
+         * 확인 전체에 걸어줄 최대 시간.
+         *
+         * 목록 주소가 아직 없는 만화는 회차 페이지를 먼저 가져와 목록 버튼을 읽는다.
+         * 처음 한 번은 한 편에 페이지를 두 번 가져오므로 넉넉히 둔다.
+         */
+        const val TOTAL_TIMEOUT_MS = 240_000L
+        /** 기준 페이지가 열리기를 기다리는 최대 시간 */
+        const val BASE_TIMEOUT_MS = 60_000L
         const val POLL_MS = 400L
         const val CONCURRENCY = 3
     }
@@ -59,8 +72,12 @@ class WebEpisodeCheck(
                 log.append("[${c.title}] 경로에 회차 번호 없음\n")
                 continue
             }
-            val listPath = c.listPath?.takeIf { it.isNotBlank() } ?: SiteUrl.guessListPath(ref)
-            if (listPath.isNullOrBlank()) {
+            val saved = c.listPath?.takeIf { it.isNotBlank() }
+            // 목록 주소가 아직 없으면 저장된 회차 페이지를 먼저 가져와 사이트의 목록
+            // 버튼을 읽는다. 짐작한 주소는 그 버튼을 못 찾았을 때만 쓴다.
+            val probe = if (saved == null) c.path else ""
+            val listPath = saved ?: SiteUrl.guessListPath(ref).orEmpty()
+            if (listPath.isEmpty() && probe.isEmpty()) {
                 log.append("[${c.title}] 목록 주소를 만들지 못함\n")
                 continue
             }
@@ -69,6 +86,8 @@ class WebEpisodeCheck(
                     .put("id", c.id)
                     .put("title", c.title)
                     .put("url", listPath)
+                    .put("saved", saved != null)
+                    .put("probe", probe)
                     .put("enc", SiteUrl.encodeUri(ref.before).substringAfterLast('/'))
                     .put("dec", ref.before.substringAfterLast('/'))
                     .put("ep", ref.ep),
@@ -93,6 +112,7 @@ class WebEpisodeCheck(
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 if (finished) return
+                baseLoaded = true
                 log.append("기준 페이지 열림: $url\n")
                 web.evaluateJavascript(buildScript(tasks), null)
                 poll(tasks.length(), log, onProgress, onDone, System.currentTimeMillis())
@@ -101,13 +121,15 @@ class WebEpisodeCheck(
         web.loadUrl(root)
 
         // 기준 페이지조차 못 열면 폴링이 시작되지 않으므로 여기서도 시간을 잰다.
+        // 열렸으면 손대지 않는다. 예전에는 전체 시간 제한과 같은 값이라, 잘 돌던
+        // 확인도 그 시각이 되면 "기준 페이지를 열지 못했다" 며 끊겼다.
         main.postDelayed({
-            if (!finished) {
+            if (!finished && !baseLoaded) {
                 finished = true
                 log.append("기준 페이지를 열지 못했습니다. 주소 번호가 맞는지 확인해 주세요.\n")
                 onDone(emptyList(), log.toString())
             }
-        }, TOTAL_TIMEOUT_MS)
+        }, BASE_TIMEOUT_MS)
     }
 
     private fun poll(
@@ -124,6 +146,7 @@ class WebEpisodeCheck(
             if (state != null) {
                 onProgress(state.optInt("done", 0), total)
                 val results = state.optJSONArray("results")
+                if (results != null) lastResults = results
                 if (state.optBoolean("finished", false) && results != null) {
                     finished = true
                     onDone(toOutcomes(results, log), log.toString())
@@ -132,8 +155,11 @@ class WebEpisodeCheck(
             }
             if (System.currentTimeMillis() - startedAt > TOTAL_TIMEOUT_MS) {
                 finished = true
-                log.append("시간이 너무 오래 걸려 중단했습니다.\n")
-                onDone(emptyList(), log.toString())
+                // 예전에는 여기서 결과를 통째로 버렸다. 끝난 것은 살리고 나머지만
+                // "확인하지 못했습니다" 로 남긴다.
+                val partial = lastResults ?: JSONArray()
+                log.append("시간이 너무 오래 걸려 ${partial.length()}/$total 편까지만 확인하고 멈췄습니다.\n")
+                onDone(toOutcomes(partial, log), log.toString())
                 return@evaluateJavascript
             }
             main.postDelayed({ poll(total, log, onProgress, onDone, startedAt) }, POLL_MS)
@@ -161,6 +187,14 @@ class WebEpisodeCheck(
             val error = o.optString("error", "").ifEmpty { null }
             val ep = if (o.has("ep") && !o.isNull("ep")) o.optInt("ep") else null
             val path = o.optString("path", "").ifEmpty { null }
+            // 목록 버튼에서 읽어 와 실제로 열어본 주소만 저장한다.
+            val listPath = o.optString("listPath", "").ifEmpty { null }?.let { SiteUrl.listPathFromHref(it) }
+            val from = when (o.optString("from", "")) {
+                "site" -> "사이트 버튼"
+                "saved" -> "저장된 값"
+                "guess" -> "짐작"
+                else -> "?"
+            }
 
             log.append("[$title] ")
             when {
@@ -168,13 +202,18 @@ class WebEpisodeCheck(
                 ep != null -> log.append("최신 ${ep}화, 주소 ${SiteUrl.decodeUri(path ?: "")}")
                 else -> log.append("회차 링크를 찾지 못함")
             }
-            log.append("  (상태 ${o.optInt("status", 0)}, ${o.optInt("size", 0)}바이트)\n")
+            log.append("  (상태 ${o.optInt("status", 0)}, ${o.optInt("size", 0)}바이트, 목록=$from)\n")
             // 실패했을 때는 어느 주소를 두드렸는지가 가장 중요한 단서다.
             // 이게 없으면 404 를 보고도 주소를 짐작해야 한다.
-            if (error != null || ep == null) {
+            // 사이트 버튼에서 새로 읽어 온 주소도 무엇인지 남긴다.
+            if (error != null || ep == null || listPath != null) {
                 o.optString("url", "").takeIf { it.isNotEmpty() }?.let {
-                    log.append("    목록 주소: ${SiteUrl.decodeUri(it)}\n")
+                    val note = if (listPath != null) "  (사이트 버튼에서 읽어 저장)" else ""
+                    log.append("    목록 주소: ${SiteUrl.decodeUri(it)}$note\n")
                 }
+            }
+            o.optString("siteRejected", "").takeIf { it.isNotEmpty() }?.let {
+                log.append("    사이트 버튼 주소 ${SiteUrl.decodeUri(it)} 에서는 이 작품 회차를 못 찾아 짐작한 주소로 봤습니다\n")
             }
             o.optString("needles", "").takeIf { it.isNotEmpty() }?.let {
                 log.append("    제목 발견 횟수: $it\n")
@@ -182,7 +221,7 @@ class WebEpisodeCheck(
             o.optString("around", "").takeIf { it.isNotEmpty() }?.let {
                 log.append("    주변: ${it.replace("\n", " ").take(280)}\n")
             }
-            out.add(Outcome(id, ep, path, error))
+            out.add(Outcome(id, ep, path, error, listPath))
         }
         return out
     }
@@ -201,6 +240,7 @@ class WebEpisodeCheck(
     private fun buildScript(tasks: JSONArray): String = """
         (function () {
           var tasks = $tasks;
+          var LIST_SEL = ${JSONObject.quote(SiteUrl.LIST_LINK_SELECTOR)};
           var results = [];
           var idx = 0;
           window.__toonState = { done: 0, finished: false, results: [] };
@@ -284,11 +324,40 @@ class WebEpisodeCheck(
             next();
           }
 
-          function next() {
-            if (idx >= tasks.length) return;
-            var t = tasks[idx++];
+          // 회차 페이지에서 사이트의 목록 버튼 주소를 꺼낸다. 없으면 빈 문자열.
+          function listLinkIn(html, pagePath) {
+            try {
+              var doc = new DOMParser().parseFromString(html, "text/html");
+              var a = doc.querySelector(LIST_SEL);
+              if (!a) return "";
+              var base = new URL(pagePath, location.origin);
+              var u = new URL(a.getAttribute("href") || "", base);
+              if (u.origin !== location.origin) return "";
+              if (u.pathname === "/" || u.pathname === base.pathname) return "";
+              return u.pathname + u.search;
+            } catch (e) {
+              return "";
+            }
+          }
+
+          // 목록 주소를 정한다. 저장된 값이 있으면 그대로, 없으면 회차 페이지의
+          // 목록 버튼을 읽고, 그것도 없으면 짐작한 주소를 쓴다.
+          function resolveList(t) {
+            if (!t.probe) return Promise.resolve({ url: t.url, from: t.saved ? "saved" : "guess" });
+            return fetch(t.probe, { credentials: "omit" })
+              .then(function (r) { return r.ok ? r.text() : ""; })
+              .then(function (html) {
+                var href = html ? listLinkIn(html, t.probe) : "";
+                return href ? { url: href, from: "site" } : { url: t.url, from: "guess" };
+              })
+              .catch(function () { return { url: t.url, from: "guess" }; });
+          }
+
+          // 목록 페이지 하나를 가져와 이 작품의 가장 큰 회차를 찾는다. 실패해도
+          // 예외를 던지지 않고 오류가 담긴 결과를 돌려준다.
+          function scanList(t, list) {
             var status = 0;
-            fetch(t.url, { credentials: "omit" })
+            return fetch(list.url, { credentials: "omit" })
               .then(function (r) { status = r.status; return r.text(); })
               .then(function (html) {
                 var lower = html.toLowerCase();
@@ -298,13 +367,50 @@ class WebEpisodeCheck(
                   { n: t.dec.replace(/_/g, " "), lower: false, label: "화면글자" }
                 ];
                 var best = scan(html, lower, needles);
-                var e = { id: t.id, title: t.title, url: t.url, status: status, size: html.length };
-                if (best) { e.ep = best.ep; if (best.path) e.path = best.path; }
-                else { e.error = "회차 번호를 찾지 못함"; diagnose(html, lower, needles, e); }
-                record(e);
+                var e = { id: t.id, title: t.title, url: list.url, from: list.from,
+                          status: status, size: html.length };
+                if (best) {
+                  e.ep = best.ep;
+                  if (best.path) e.path = best.path;
+                  // 목록 버튼에서 읽은 주소는 그 페이지에서 이 작품의 회차를 실제로
+                  // 찾았을 때만 저장하게 넘긴다. 열리기만 하고 엉뚱한 페이지일 수 있다.
+                  if (list.from === "site" && status === 200) e.listPath = list.url;
+                } else {
+                  e.error = "회차 번호를 찾지 못함";
+                  diagnose(html, lower, needles, e);
+                }
+                return e;
               })
               .catch(function (err) {
-                record({ id: t.id, title: t.title, url: t.url, status: status, size: 0,
+                return { id: t.id, title: t.title, url: list.url, from: list.from,
+                         status: status, size: 0,
+                         error: String((err && err.message) || err) };
+              });
+          }
+
+          function next() {
+            if (idx >= tasks.length) return;
+            var t = tasks[idx++];
+            resolveList(t)
+              .then(function (list) {
+                if (!list.url) {
+                  return { id: t.id, title: t.title, url: "", from: list.from,
+                           status: 0, size: 0, error: "목록 주소를 찾지 못함" };
+                }
+                return scanList(t, list).then(function (e) {
+                  // 사이트 버튼이 가리킨 페이지에 이 작품 회차가 없으면 예전처럼
+                  // 짐작한 주소로 한 번 더 본다. 예전보다 나빠지는 경우가 없게 한다.
+                  if (e.ep === undefined && list.from === "site" && t.url && t.url !== list.url) {
+                    return scanList(t, { url: t.url, from: "guess" }).then(function (e2) {
+                      e2.siteRejected = list.url;
+                      return e2;
+                    });
+                  }
+                  return e;
+                });
+              })
+              .then(record, function (err) {
+                record({ id: t.id, title: t.title, url: t.url, from: "?", status: 0, size: 0,
                          error: String((err && err.message) || err) });
               });
           }
