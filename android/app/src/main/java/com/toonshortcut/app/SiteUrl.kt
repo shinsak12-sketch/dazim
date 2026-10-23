@@ -371,6 +371,17 @@ object SiteUrl {
             ".bottom-navbar a[title='목록'], .bottom-navbar a[aria-label='목록']"
 
     /**
+     * 회차 페이지 아래쪽 바의 "다음 화" 버튼.
+     *
+     * 다음 화가 있으면 그 회차로 가는 링크이고, 마지막 화에서는 꺼져 있다.
+     * 페이지 진단 기록으로 확인한 마지막 화의 모양:
+     *
+     *   <a class="tkbn-b tkbn-next dis" title="마지막화입니다"
+     *      href="javascript:alert('마지막화입니다');">
+     */
+    const val NEXT_LINK_SELECTOR = "a.tkbn-next"
+
+    /**
      * 목록 버튼의 링크를 저장하는 형태(인코딩된 경로)로 맞춘다. 쓸 수 없으면 null.
      * 절대 주소와 "/…" 경로를 둘 다 받는다. 호스트는 버린다. 번호가 자주 바뀐다.
      */

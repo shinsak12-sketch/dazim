@@ -110,6 +110,27 @@ class ReaderActivity : AppCompatActivity() {
             })()
         """.trimIndent()
 
+        /**
+         * 사이트의 다음 화 버튼 상태. "last"(꺼짐), "next:/주소"(살아 있음),
+         * "none"(버튼 없음) 중 하나. 새 회차 확인과 같은 기준이다.
+         */
+        private val JS_NEXT_STATE = """
+            (function () {
+              try {
+                var a = document.querySelector(${JSONObject.quote(SiteUrl.NEXT_LINK_SELECTOR)});
+                if (!a) return "none";
+                var href = (a.getAttribute("href") || "").trim();
+                var off = a.classList.contains("dis") || a.classList.contains("disabled") ||
+                          href === "" || href === "#" || /^javascript:/i.test(href);
+                if (off) return "last";
+                var u = new URL(href, location.href);
+                return "next:" + (u.origin === location.origin ? u.pathname + u.search : "");
+              } catch (e) {
+                return "none";
+              }
+            })()
+        """.trimIndent()
+
         private val JS_PAGE_DUMP = """
             (function () {
               try {
@@ -535,65 +556,32 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /**
-     * 지금 열린 페이지의 회차 링크를 훑어 목록의 표시를 갱신한다.
+     * 지금 보는 페이지의 사이트 "다음 화" 버튼으로 목록의 표시를 갱신한다.
+     * 새 회차 확인과 같은 기준이다. 버튼이 살아 있으면 새 회차, 꺼져 있으면 최신.
      *
-     * 회차 번호 앞부분까지만 맞춰보고 뒤의 숫자를 읽는다. 부제가 붙는 작품도,
-     * 0을 채워 쓰는 작품도 이 방식이면 같이 걸린다.
-     *
-     * 목록의 일괄 확인이 실패한 만화도 한 번 열어보면 여기서 결과가 채워진다.
-     * 보고 있는 회차가 저장된 회차와 다를 때는 판단하지 않는다.
-     * 그 결과는 다른 회차에 대한 것이라 저장해두면 틀린 정보가 된다.
+     * 저장된 회차를 보고 있을 때만 판단한다. 다른 회차의 다음 버튼은 저장된
+     * 회차와 상관이 없다. 버튼을 못 찾으면 기존 표시를 건드리지 않는다.
      */
     private fun refreshNextFromPage() {
         val c = comic ?: return
-        val ref = SiteUrl.parseEpisode(c.path) ?: return
-        val viewing = web.url?.let { SiteUrl.parseInput(it) }?.let { SiteUrl.parseEpisode(it.path) }
-        if (viewing == null || viewing.ep != ref.ep) return
+        val viewing = web.url?.let { SiteUrl.parseInput(it) }?.path ?: return
+        if (SiteUrl.decodeUri(viewing) != SiteUrl.decodeUri(c.path)) return
 
-        val encoded = JSONObject.quote(SiteUrl.encodeUri(ref.before).substringAfterLast('/').lowercase())
-        val decoded = JSONObject.quote(ref.before.substringAfterLast('/'))
-
-        // 정규식 이스케이프를 피하려고 문자열 검색으로 훑는다.
-        // 제목에 . ( ) 같은 글자가 섞여도 안전하다.
-        val js = """
-            (function () {
-              try {
-                var html = document.documentElement.outerHTML;
-                var lower = html.toLowerCase();
-                var max = -1;
-                var pairs = [[$encoded, lower], [$decoded, html]];
-                for (var p = 0; p < pairs.length; p++) {
-                  var needle = pairs[p][0];
-                  var hay = pairs[p][1];
-                  if (!needle) continue;
-                  var at = 0;
-                  while ((at = hay.indexOf(needle, at)) !== -1) {
-                    var j = at + needle.length;
-                    var digits = "";
-                    while (j < hay.length && hay.charAt(j) >= "0" && hay.charAt(j) <= "9") {
-                      digits += hay.charAt(j);
-                      j++;
-                    }
-                    if (digits.length > 0) {
-                      var v = parseInt(digits, 10);
-                      if (v > max) max = v;
-                    }
-                    at += needle.length;
-                  }
+        web.evaluateJavascript(JS_NEXT_STATE) { raw ->
+            if (isFinishing || isDestroyed) return@evaluateJavascript
+            val state = try {
+                JSONTokener(raw ?: "").nextValue() as? String
+            } catch (e: Exception) {
+                null
+            } ?: return@evaluateJavascript
+            when {
+                state == "last" -> store.setNext(comicId, NextStatus.NO)
+                state.startsWith("next:") -> {
+                    val path = state.removePrefix("next:").takeIf { it.startsWith("/") }
+                    store.setNext(comicId, NextStatus.YES, null, null, path)
                 }
-                return String(max);
-              } catch (e) {
-                return "?";
-              }
-            })()
-        """.trimIndent()
-
-        web.evaluateJavascript(js) { raw ->
-            val max = raw?.trim()?.trim('"')?.toIntOrNull()
-            if (max != null && max >= 0) {
-                store.setNext(comicId, if (max > ref.ep) NextStatus.YES else NextStatus.NO)
+                // "none": 버튼을 못 찾았다. 판단할 근거가 없으니 그대로 둔다.
             }
-            // 판단할 수 없으면 기존 값을 건드리지 않는다.
         }
     }
 

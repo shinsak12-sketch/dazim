@@ -314,27 +314,12 @@ class MainActivity : AppCompatActivity() {
      * 후자는 주소를 고쳐야 해서 사용자가 할 일이 다르다.
      */
     private fun statusBadge(c: Comic): View? {
-        val ep = SiteUrl.parseEpisode(c.path)?.ep
         return when (c.next) {
-            NextStatus.YES -> {
-                val latest = c.latestEp
-                val gap = if (latest != null && ep != null) latest - ep else null
-                val shown = latest ?: ep?.plus(1)
-                val text = when {
-                    shown == null -> "새 회차"
-                    gap != null && gap > 1 -> "+$gap · ${shown}화"
-                    else -> "새 회차 · ${shown}화"
-                }
-                badge(text, Ui.GREEN) {
-                    // 사이트가 준 주소가 있으면 그걸 쓴다. 표기가 바뀌는 작품은
-                    // 번호만 갈아끼워서는 주소를 만들 수 없다.
-                    val exact = c.latestPath
-                    when {
-                        !exact.isNullOrBlank() -> openReaderAt(c, exact)
-                        ep != null -> openReader(c, ep + 1)
-                        else -> openReader(c)
-                    }
-                }
+            // 몇 화가 남았는지는 세지 않는다. 다음 화가 있는지만 본다.
+            NextStatus.YES -> badge("새 회차", Ui.GREEN) {
+                // 사이트의 다음 화 버튼이 가리키던 주소로 바로 연다.
+                val exact = c.latestPath
+                if (!exact.isNullOrBlank()) openReaderAt(c, exact) else openReader(c)
             }
 
             NextStatus.NO -> badge("최신", Ui.TEXT_FAINT, null)
@@ -464,32 +449,25 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    /**
+     * 확인 결과를 반영한다. 저장된 회차 페이지의 다음 화 버튼이 살아 있으면
+     * 새 회차, 꺼져 있으면 최신. 버튼을 못 봤으면 실패로 둔다.
+     */
     private fun applyOutcomes(comics: List<Comic>, outcomes: List<WebEpisodeCheck.Outcome>) {
         val byId = outcomes.associateBy { it.comicId }
         for (c in comics) {
-            val ref = SiteUrl.parseEpisode(c.path)
             val o = byId[c.id]
-            // 사이트의 목록 버튼에서 읽어 온 주소는 저장해 둔다. 다음부터는 짐작하지
-            // 않고 이 주소로 바로 간다.
-            val found = o?.listPath
-            if (found != null && found != c.listPath) store.updateComic(c.id, listPath = found)
             when {
-                ref == null ->
-                    store.setNext(c.id, NextStatus.NO_EPISODE, "주소에 회차 번호가 없습니다")
                 o == null ->
                     store.setNext(c.id, NextStatus.FAILED, "확인하지 못했습니다")
                 o.error != null ->
                     store.setNext(c.id, NextStatus.FAILED, o.error)
-                o.ep != null ->
-                    store.setNext(
-                        c.id,
-                        if (o.ep > ref.ep) NextStatus.YES else NextStatus.NO,
-                        null,
-                        o.ep,
-                        o.path,
-                    )
+                o.hasNext == true ->
+                    store.setNext(c.id, NextStatus.YES, null, null, o.nextPath)
+                o.hasNext == false ->
+                    store.setNext(c.id, NextStatus.NO)
                 else ->
-                    store.setNext(c.id, NextStatus.FAILED, "회차 링크를 찾지 못했습니다")
+                    store.setNext(c.id, NextStatus.FAILED, "다음 화 버튼을 찾지 못했습니다")
             }
         }
     }
