@@ -68,6 +68,8 @@ class Store(context: Context) {
 
     private object Keys {
         const val AUTO_SAVE = "auto_save_episode"
+        const val MAIN_THEME = "main_theme"
+        const val FEED_QUIET_OPEN = "feed_quiet_open"
     }
 
     private val defaultDomain =
@@ -145,6 +147,16 @@ class Store(context: Context) {
     var autoSaveEpisode: Boolean
         get() = prefs.getBoolean(Keys.AUTO_SAVE, true)
         set(value) = prefs.edit().putBoolean(Keys.AUTO_SAVE, value).apply()
+
+    /** 메인 화면 모양. MainScreen.THEMES 의 순서와 같다. */
+    var mainTheme: Int
+        get() = prefs.getInt(Keys.MAIN_THEME, 0)
+        set(value) = prefs.edit().putInt(Keys.MAIN_THEME, value).apply()
+
+    /** 알림 피드 화면에서 "조용한 만화" 칸을 펼쳐 둘지. */
+    var feedQuietOpen: Boolean
+        get() = prefs.getBoolean(Keys.FEED_QUIET_OPEN, true)
+        set(value) = prefs.edit().putBoolean(Keys.FEED_QUIET_OPEN, value).apply()
 
     fun bumpDomain(delta: Int): SiteUrl.Domain {
         val d = domain

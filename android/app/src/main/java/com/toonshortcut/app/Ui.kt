@@ -3,9 +3,12 @@ package com.toonshortcut.app
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.os.Build
 import android.view.View
 
 /**
@@ -47,11 +50,18 @@ object Ui {
         rounded(color, 999, ctx)
 
     /** 눌렀을 때 반응이 보이도록 물결 효과를 씌운다. */
-    fun tappable(view: View, background: Drawable) {
-        view.background = RippleDrawable(ColorStateList.valueOf(RIPPLE), background, null)
+    fun tappable(view: View, background: Drawable?, ripple: Int = RIPPLE) {
+        // 배경이 없으면 눌렀을 때만 물결이 보이도록 모양만 잡아준다.
+        val mask = if (background == null) ColorDrawable(Color.WHITE) else null
+        view.background = RippleDrawable(ColorStateList.valueOf(ripple), background, mask)
         view.isClickable = true
         view.isFocusable = true
     }
+
+    /** 굵기를 숫자로 고른다(800, 900 등). 안드로이드 9 미만은 그냥 굵게. */
+    fun weight(w: Int): Typeface =
+        if (Build.VERSION.SDK_INT >= 28) Typeface.create(Typeface.DEFAULT, w, false)
+        else if (w >= 600) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
 
     /** 색에 투명도를 준다. 배지 배경처럼 은은한 색을 만들 때 쓴다. */
     fun alpha(color: Int, a: Int): Int =

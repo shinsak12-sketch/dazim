@@ -5,36 +5,33 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.text.InputType
-import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
-import android.widget.FrameLayout
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), MainHost {
 
     private lateinit var store: Store
-    private lateinit var listContainer: LinearLayout
-    private lateinit var domainView: TextView
-    private lateinit var subtitleView: TextView
-    private lateinit var checkButton: TextView
-    private lateinit var swipe: SwipeRefreshLayout
+
+    /** 바깥 틀. 화면 모양을 바꾸면 안쪽 [screen] 만 갈아 끼운다. */
+    private lateinit var frame: FrameLayout
+    private lateinit var screen: MainScreen
 
     /**
      * 새 회차 확인에 쓰는 보이지 않는 WebView.
@@ -44,14 +41,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var hiddenWeb: WebView
     private var checking = false
 
-    /**
-     * 새 회차가 있는 것부터 보여줄지 여부.
-     *
-     * 저장된 순서를 실제로 바꾸지 않고 보여줄 때만 다시 늘어놓는다.
-     * 직접 맞춰둔 순서가 새로고침 한 번에 사라지면 안 되기 때문이다.
-     * 그래서 앱을 다시 켜면 원래 순서로 돌아온다.
-     */
-    private var sortByNew = false
+    /** 확인 중 진행 글자. 도중에 화면 모양을 바꿔도 이어서 보여준다. */
+    private var progressText: String? = null
 
     /** 마지막 확인에서 무슨 일이 있었는지. 판정이 어긋날 때 파일로 내보낸다. */
     private var lastDiagnostics: String? = null
@@ -75,10 +66,16 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = Store(this)
-        val root = buildLayout()
-        setContentView(root)
-        root.padForSystemBars()
-        render()
+
+        frame = FrameLayout(this)
+        // 확인용 WebView 를 화면에 두되 눈에 띄지 않게 한다.
+        // 완전히 떼어두면 자바스크립트가 제대로 돌지 않는 기기가 있다.
+        hiddenWeb = WebView(this)
+        frame.addView(hiddenWeb, FrameLayout.LayoutParams(1, 1))
+        setContentView(frame)
+        frame.padForSystemBars()
+
+        applyTheme()
         handleShare(intent)
     }
 
@@ -102,235 +99,129 @@ class MainActivity : AppCompatActivity() {
         if (text.isNotEmpty()) showComicDialog(prefillUrl = text)
     }
 
-    // ------------------------------------------------------------------ 화면 뼈대
+    // ------------------------------------------------------------------ 화면 모양
 
-    private fun buildLayout(): View {
-        val scroll = ScrollView(this).apply {
-            setBackgroundColor(Ui.BG)
-            isFillViewport = true
-        }
-        swipe = SwipeRefreshLayout(this).apply {
-            setBackgroundColor(Ui.BG)
-            setColorSchemeColors(Ui.ACCENT)
-            setProgressBackgroundColorSchemeColor(Ui.SURFACE)
-            // 맨 위에서 아래로 당기면 확인하고, 새 회차가 있는 것부터 보여준다.
-            setOnRefreshListener { checkNewEpisodes(sortAfter = true) }
-        }
-        val root = column().apply { setPadding(pad(20), pad(20), pad(20), pad(40)) }
-
-        val titleRow = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        titleRow.addView(TextView(this).apply {
-            text = "만화 바로가기"
-            textSize = 24f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Ui.TEXT)
-            letterSpacing = -0.02f
-        }, LinearLayout.LayoutParams(0, wrap, 1f))
-
-        // 목록을 바꾸는 버튼. 배경도 글자도 물결 효과도 주지 않아 눈에 띄지 않는다.
-        // 어떤 목록을 보고 있는지는 목록 내용으로만 알 수 있다.
-        titleRow.addView(
-            View(this).apply { setOnClickListener { Store.toggleList(); render() } },
-            LinearLayout.LayoutParams(pad(56), pad(44)),
-        )
-        root.addView(titleRow)
-        subtitleView = TextView(this).apply {
-            textSize = 13f
-            setTextColor(Ui.TEXT_DIM)
-            setPadding(0, pad(2), 0, 0)
-        }
-        root.addView(subtitleView)
-
-        root.addView(buildDomainCard(), marginTop(18))
-
-        val actionRow = row()
-        checkButton = softButton("새 회차 확인") { checkNewEpisodes() }
-        actionRow.addView(checkButton, weightWithRightGap())
-        actionRow.addView(accentButton("만화 추가") { showComicDialog() }, weight())
-        root.addView(actionRow, marginTop(10))
-
-        listContainer = column()
-        root.addView(listContainer, marginTop(18))
-
-        val backupRow = row()
-        backupRow.addView(softButton("내보내기") { exportList() }, weightWithRightGap())
-        backupRow.addView(softButton("가져오기") { showImportDialog() }, weight())
-        root.addView(backupRow, marginTop(14))
-
-        root.addView(softButton("진단 기록 꺼내기") { shareDiagnostics() }, marginTop(8))
-
-        root.addView(TextView(this).apply {
-            text = "다음 화로 넘어가면 회차가 자동으로 저장됩니다.\n" +
-                "주소가 막히면 뷰어에서 주소 +1 을 눌러주세요."
-            textSize = 11.5f
-            setLineSpacing(pad(3).toFloat(), 1f)
-            setTextColor(Ui.TEXT_FAINT)
-        }, marginTop(24))
-
-        scroll.addView(root)
-        swipe.addView(scroll)
-
-        // 확인용 WebView 를 화면에 두되 눈에 띄지 않게 한다.
-        // 완전히 떼어두면 자바스크립트가 제대로 돌지 않는 기기가 있다.
-        hiddenWeb = WebView(this)
-        val frame = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
+    /** 저장된 화면 모양으로 안쪽을 새로 만든다. 상태바 색도 같이 맞춘다. */
+    @Suppress("DEPRECATION")
+    private fun applyTheme() {
+        if (::screen.isInitialized) frame.removeView(screen.view)
+        screen = MainScreen.create(store.mainTheme, this, this, store)
+        // WebView 보다 아래(먼저)에 둔다. WebView 는 1×1 이라 가려도 티가 안 난다.
         frame.addView(
-            swipe,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT,
-            ),
+            screen.view,
+            0,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
         )
-        frame.addView(hiddenWeb, FrameLayout.LayoutParams(1, 1))
-        return frame
-    }
 
-    private fun buildDomainCard(): View {
-        val card = column().apply {
-            background = Ui.rounded(Ui.SURFACE, 18, context, Ui.BORDER)
-            setPadding(pad(16), pad(14), pad(16), pad(16))
+        val bg = screen.bg
+        frame.setBackgroundColor(bg)
+        window.setBackgroundDrawable(ColorDrawable(bg))
+        // 안드로이드 14 이하는 상태바를 직접 칠해야 한다. 15 부터는 뒤의 frame 색이 비친다.
+        window.statusBarColor = bg
+        window.navigationBarColor = bg
+        WindowCompat.getInsetsController(window, frame).apply {
+            isAppearanceLightStatusBars = screen.lightBars
+            isAppearanceLightNavigationBars = screen.lightBars
         }
 
-        card.addView(TextView(this).apply {
-            text = "현재 주소"
-            textSize = 11f
-            letterSpacing = 0.08f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Ui.TEXT_DIM)
-        })
-
-        val r = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        r.addView(stepper("−") { store.bumpDomain(-1); render() })
-
-        domainView = TextView(this).apply {
-            gravity = Gravity.CENTER
-            textSize = 17f
-            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
-            setTextColor(Ui.TEXT)
-            setPadding(pad(8), pad(12), pad(8), pad(12))
-            Ui.tappable(this, Ui.rounded(Ui.BG, 14, context, Ui.BORDER))
-            setOnClickListener { showDomainDialog() }
-        }
-        r.addView(domainView, LinearLayout.LayoutParams(0, wrap, 1f).apply {
-            leftMargin = pad(10); rightMargin = pad(10)
-        })
-
-        r.addView(stepper("+", accent = true) { store.bumpDomain(1); render() })
-        card.addView(r, marginTop(12))
-
-        card.addView(TextView(this).apply {
-            text = "주소를 눌러 직접 고칠 수 있습니다"
-            textSize = 11f
-            gravity = Gravity.CENTER
-            setTextColor(Ui.TEXT_FAINT)
-        }, marginTop(10))
-
-        return card
+        screen.showProgress(if (checking) progressText else null)
+        screen.render()
     }
-
-    // ------------------------------------------------------------------ 목록 그리기
 
     private fun render() {
-        domainView.text = SiteUrl.buildHost(store.domain)
-        listContainer.removeAllViews()
+        if (::screen.isInitialized) screen.render()
+    }
 
-        val stored = store.comics
-        val comics = if (sortByNew) stored.sortedBy { rankFor(it.next) } else stored
-        subtitleView.text = if (comics.isEmpty()) "저장한 만화 없음" else "만화 ${comics.size}편"
+    private fun showThemeDialog() {
+        val current = store.mainTheme.coerceIn(0, MainScreen.THEMES.size - 1)
+        AlertDialog.Builder(this)
+            .setTitle("화면 모양")
+            .setSingleChoiceItems(MainScreen.THEMES, current) { dialog, which ->
+                dialog.dismiss()
+                if (which != store.mainTheme) {
+                    store.mainTheme = which
+                    applyTheme()
+                }
+            }
+            .setNegativeButton("닫기", null)
+            .show()
+    }
 
-        if (comics.isEmpty()) {
-            listContainer.addView(emptyState())
+    // ------------------------------------------------------------------ MainHost
+
+    override fun openComic(c: Comic) {
+        startActivity(
+            Intent(this, ReaderActivity::class.java)
+                .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id),
+        )
+    }
+
+    /** 사이트의 다음 화 버튼이 가리키던 주소로 바로 연다. 없으면 저장한 회차. */
+    override fun openNew(c: Comic) {
+        val exact = c.latestPath
+        if (exact.isNullOrBlank()) {
+            openComic(c)
             return
         }
-        for (c in comics) listContainer.addView(buildComicCard(c), marginTop(10))
+        startActivity(
+            Intent(this, ReaderActivity::class.java)
+                .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id)
+                .putExtra(ReaderActivity.EXTRA_PATH, exact),
+        )
     }
 
-    /** 새 회차가 있는 것이 위로, 이미 최신인 것이 아래로 간다. */
-    private fun rankFor(status: NextStatus): Int = when (status) {
-        NextStatus.YES -> 0
-        NextStatus.FAILED -> 1
-        NextStatus.NO_EPISODE -> 2
-        NextStatus.UNKNOWN -> 3
-        NextStatus.NO -> 4
-    }
-
-    private fun emptyState(): View = column().apply {
-        background = Ui.rounded(Ui.SURFACE, 18, context, Ui.BORDER)
-        setPadding(pad(20), pad(36), pad(20), pad(36))
-        gravity = Gravity.CENTER
-        addView(TextView(this@MainActivity).apply {
-            text = "저장한 만화가 없습니다"
-            textSize = 15f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Ui.TEXT_DIM)
-            gravity = Gravity.CENTER
-        })
-        addView(TextView(this@MainActivity).apply {
-            text = "보던 주소를 복사한 뒤\n아래 [만화 추가]를 누르세요"
-            textSize = 12.5f
-            gravity = Gravity.CENTER
-            setLineSpacing(pad(3).toFloat(), 1f)
-            setTextColor(Ui.TEXT_FAINT)
-            setPadding(0, pad(8), 0, 0)
-        })
-    }
-
-    private fun buildComicCard(c: Comic): View {
-        val card = row().apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(pad(16), pad(14), pad(14), pad(14))
-            Ui.tappable(this, Ui.rounded(Ui.SURFACE, 18, context, Ui.BORDER))
-            setOnClickListener { openReader(c) }
-            setOnLongClickListener { showComicMenu(c); true }
+    override fun showStatus(c: Comic) {
+        when (c.next) {
+            NextStatus.NO_EPISODE -> showNoEpisodeDialog(c)
+            NextStatus.FAILED -> showFailureDialog(c)
+            NextStatus.YES -> openNew(c)
+            else -> openComic(c)
         }
-
-        val texts = column()
-        texts.addView(TextView(this).apply {
-            text = c.title
-            textSize = 16f
-            maxLines = 1
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(Ui.TEXT)
-        })
-
-        val meta = row().apply { gravity = Gravity.CENTER_VERTICAL }
-        meta.addView(TextView(this).apply {
-            text = SiteUrl.episodeLabel(c.path) ?: SiteUrl.decodeUri(c.path)
-            textSize = 12.5f
-            maxLines = 1
-            setTextColor(Ui.TEXT_DIM)
-        })
-        statusBadge(c)?.let { meta.addView(it, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = pad(8) }) }
-        texts.addView(meta, marginTop(4))
-
-        card.addView(texts, LinearLayout.LayoutParams(0, wrap, 1f))
-        card.addView(openButton(c), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = pad(10) })
-        return card
     }
 
-    /**
-     * 확인 결과를 배지로 보여준다.
-     *
-     * 실패와 "회차 번호 없는 주소"를 나눈다. 전자는 다시 시도하거나 열어보면 되고,
-     * 후자는 주소를 고쳐야 해서 사용자가 할 일이 다르다.
-     */
-    private fun statusBadge(c: Comic): View? {
-        return when (c.next) {
-            // 몇 화가 남았는지는 세지 않는다. 다음 화가 있는지만 본다.
-            NextStatus.YES -> badge("새 회차", Ui.GREEN) {
-                // 사이트의 다음 화 버튼이 가리키던 주소로 바로 연다.
-                val exact = c.latestPath
-                if (!exact.isNullOrBlank()) openReaderAt(c, exact) else openReader(c)
+    override fun recheck(c: Comic) = checkNewEpisodes(listOf(c))
+
+    override fun bumpDomain(delta: Int) {
+        store.bumpDomain(delta)
+        render()
+    }
+
+    override fun editDomain() = showDomainDialog()
+
+    override fun checkAll() = checkNewEpisodes(null)
+
+    override fun addComic() = showComicDialog()
+
+    override fun toggleList() {
+        Store.toggleList()
+        render()
+    }
+
+    override fun showMore() {
+        val items = arrayOf("화면 모양 바꾸기", "목록 내보내기", "목록 가져오기", "진단 기록 꺼내기", "도움말")
+        AlertDialog.Builder(this)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showThemeDialog()
+                    1 -> exportList()
+                    2 -> showImportDialog()
+                    3 -> shareDiagnostics()
+                    4 -> AlertDialog.Builder(this)
+                        .setMessage(
+                            "• 만화를 누르면 저장한 회차가 열립니다.\n" +
+                                "• 길게 누르면 수정·삭제 메뉴가 나옵니다.\n" +
+                                "• 다음 화로 넘어가면 회차가 자동으로 저장됩니다.\n" +
+                                "• 주소가 막히면 + 로 주소 번호를 올려주세요.\n" +
+                                "• 맨 위에서 아래로 당겨도 새 회차를 확인합니다.",
+                        )
+                        .setPositiveButton("확인", null)
+                        .show()
+                }
             }
-
-            NextStatus.NO -> badge("최신", Ui.TEXT_FAINT, null)
-
-            NextStatus.FAILED -> badge("확인 실패", Ui.RED) { showFailureDialog(c) }
-
-            NextStatus.NO_EPISODE -> badge("회차 없음", Ui.AMBER) { showNoEpisodeDialog(c) }
-
-            NextStatus.UNKNOWN -> null
-        }
+            .show()
     }
+
+    // ------------------------------------------------------------------ 상태 안내
 
     /** 왜 실패했는지 그대로 보여준다. 원인을 짐작하게 만들지 않는다. */
     private fun showFailureDialog(c: Comic) {
@@ -340,7 +231,8 @@ class MainActivity : AppCompatActivity() {
                 (c.nextNote ?: "원인을 알 수 없습니다") +
                     "\n\n직접 열어보면 그 페이지를 보고 결과가 갱신됩니다.",
             )
-            .setPositiveButton("열어보기") { _, _ -> openReader(c) }
+            .setPositiveButton("열어보기") { _, _ -> openComic(c) }
+            .setNeutralButton("다시 확인") { _, _ -> recheck(c) }
             .setNegativeButton("닫기", null)
             .show()
     }
@@ -355,98 +247,78 @@ class MainActivity : AppCompatActivity() {
                     "\n\n회차 페이지 주소로 바꾸면 확인할 수 있습니다.",
             )
             .setPositiveButton("주소 수정") { _, _ -> showComicDialog(existing = c) }
-            .setNeutralButton("열어보기") { _, _ -> openReader(c) }
+            .setNeutralButton("열어보기") { _, _ -> openComic(c) }
             .setNegativeButton("닫기", null)
             .show()
     }
 
-    private fun badge(text: String, color: Int, onClick: (() -> Unit)?): TextView =
-        TextView(this).apply {
-            this.text = text
-            textSize = 11.5f
-            setTypeface(null, Typeface.BOLD)
-            setTextColor(color)
-            setPadding(pad(9), pad(4), pad(9), pad(4))
-            val bg = Ui.pill(Ui.alpha(color, 38), context)
-            if (onClick != null) {
-                Ui.tappable(this, bg)
-                setOnClickListener { onClick() }
-            } else {
-                background = bg
-            }
-        }
+    // ------------------------------------------------------------------ 새 회차 확인
 
-    private fun openButton(c: Comic): TextView = TextView(this).apply {
-        text = "열기"
-        textSize = 14f
-        gravity = Gravity.CENTER
-        setTypeface(null, Typeface.BOLD)
-        setTextColor(Ui.ON_ACCENT)
-        setPadding(pad(20), pad(11), pad(20), pad(11))
-        Ui.tappable(this, Ui.rounded(Ui.ACCENT, 14, context))
-        setOnClickListener { openReader(c) }
-    }
-
-    // ------------------------------------------------------------------ 동작
-
-    private fun openReader(c: Comic, episode: Int? = null) {
-        val intent = Intent(this, ReaderActivity::class.java)
-            .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id)
-        if (episode != null) intent.putExtra(ReaderActivity.EXTRA_EPISODE, episode)
-        startActivity(intent)
-    }
-
-    /** 사이트가 알려준 주소로 그대로 연다. */
-    private fun openReaderAt(c: Comic, path: String) {
-        startActivity(
-            Intent(this, ReaderActivity::class.java)
-                .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id)
-                .putExtra(ReaderActivity.EXTRA_PATH, path),
-        )
+    private fun setProgress(text: String?) {
+        progressText = text
+        screen.showProgress(text)
     }
 
     /**
-     * 저장된 만화들에 다음 회차가 나왔는지 한 번에 확인한다.
+     * 저장된 만화들에 다음 회차가 나왔는지 확인한다. [only] 를 주면 그것만.
      * 브라우저 안에서 돌린다. 앱에서 직접 요청하면 통신사가 연결을 끊는다.
      */
-    private fun checkNewEpisodes(sortAfter: Boolean = false) {
+    private fun checkNewEpisodes(only: List<Comic>?) {
         if (checking) {
-            swipe.isRefreshing = false
+            screen.swipe.isRefreshing = false
+            toast("이미 확인하는 중입니다.")
             return
         }
-        val comics = store.comics
+        val comics = only ?: store.comics
         if (comics.isEmpty()) {
-            swipe.isRefreshing = false
+            screen.swipe.isRefreshing = false
             toast("저장한 만화가 없습니다.")
             return
         }
         checking = true
-        checkButton.isEnabled = false
-        checkButton.text = "확인 중… 0/${comics.size}"
+        setProgress("확인 중… 0/${comics.size}")
 
         WebEpisodeCheck(hiddenWeb, store.domain).start(
             comics,
-            onProgress = { done, total -> checkButton.text = "확인 중… $done/$total" },
+            onProgress = { done, total -> setProgress("확인 중… $done/$total") },
             onDone = { outcomes, log ->
                 applyOutcomes(comics, outcomes)
                 checking = false
-                checkButton.isEnabled = true
-                checkButton.text = "새 회차 확인"
-                swipe.isRefreshing = false
-                if (sortAfter) sortByNew = true
+                setProgress(null)
+                screen.swipe.isRefreshing = false
                 lastDiagnostics = buildDiagnostics(log)
                 render()
 
-                val list = store.comics
-                val failed = list.count { it.next == NextStatus.FAILED }
-                val noEp = list.count { it.next == NextStatus.NO_EPISODE }
-                when {
-                    failed > 0 && noEp > 0 -> toast("실패 ${failed}편 · 회차 없는 주소 ${noEp}편")
-                    failed > 0 -> toast("${failed}편 실패. 배지를 누르면 이유가 나옵니다.")
-                    noEp > 0 -> toast("${noEp}편은 주소에 회차 번호가 없습니다.")
+                if (only != null) {
+                    val ids = only.map { it.id }.toSet()
+                    val after = store.comics.filter { it.id in ids }
+                    val one = after.singleOrNull()
+                    when {
+                        one == null -> Unit
+                        one.next == NextStatus.YES -> toast("새 회차가 있습니다.")
+                        one.next == NextStatus.NO -> toast("최신까지 봤습니다.")
+                        else -> toast("이번에도 실패: ${one.nextNote ?: "원인 모름"}")
+                    }
+                } else {
+                    reportAll()
                 }
             },
         )
+    }
+
+    /** 전체 확인이 끝나면 결과를 한 줄로 알려준다. */
+    private fun reportAll() {
+        val list = store.comics
+        val failed = list.count { it.next == NextStatus.FAILED }
+        val noEp = list.count { it.next == NextStatus.NO_EPISODE }
+        val fresh = list.count { it.next == NextStatus.YES }
+        when {
+            failed > 0 && noEp > 0 -> toast("실패 ${failed}편 · 회차 없는 주소 ${noEp}편")
+            failed > 0 -> toast("${failed}편 실패. 눌러보면 이유가 나옵니다.")
+            noEp > 0 -> toast("${noEp}편은 주소에 회차 번호가 없습니다.")
+            fresh > 0 -> toast("새 회차 ${fresh}편")
+            else -> toast("모두 최신입니다.")
+        }
     }
 
     /**
@@ -474,7 +346,7 @@ class MainActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ 대화상자
 
-    private fun showComicMenu(c: Comic) {
+    override fun comicMenu(c: Comic) {
         val items = arrayOf("수정", "제목 새로 뽑기", "위로", "아래로", "삭제")
         AlertDialog.Builder(this)
             .setTitle(c.title)
@@ -482,8 +354,8 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> showComicDialog(existing = c)
                     1 -> retitle(c)
-                    2 -> { sortByNew = false; store.move(c.id, -1); render() }
-                    3 -> { sortByNew = false; store.move(c.id, 1); render() }
+                    2 -> { store.move(c.id, -1); render() }
+                    3 -> { store.move(c.id, 1); render() }
                     4 -> confirmDelete(c)
                 }
             }
@@ -761,15 +633,6 @@ class MainActivity : AppCompatActivity() {
         layoutParams = LinearLayout.LayoutParams(match, wrap)
     }
 
-    private fun row() = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        layoutParams = LinearLayout.LayoutParams(match, wrap)
-    }
-
-    private fun marginTop(v: Int) = LinearLayout.LayoutParams(match, wrap).apply { topMargin = pad(v) }
-    private fun weight() = LinearLayout.LayoutParams(0, wrap, 1f)
-    private fun weightWithRightGap() = LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = pad(8) }
-
     private fun label(text: String) = TextView(this).apply {
         this.text = text
         textSize = 11f
@@ -777,39 +640,6 @@ class MainActivity : AppCompatActivity() {
         letterSpacing = 0.06f
         setTextColor(Ui.TEXT_DIM)
         setPadding(0, pad(12), 0, pad(2))
-    }
-
-    private fun accentButton(text: String, onClick: () -> Unit) = TextView(this).apply {
-        this.text = text
-        textSize = 15f
-        gravity = Gravity.CENTER
-        setTypeface(null, Typeface.BOLD)
-        setTextColor(Ui.ON_ACCENT)
-        setPadding(pad(16), pad(15), pad(16), pad(15))
-        Ui.tappable(this, Ui.rounded(Ui.ACCENT, 16, context))
-        setOnClickListener { onClick() }
-    }
-
-    private fun softButton(text: String, onClick: () -> Unit) = TextView(this).apply {
-        this.text = text
-        textSize = 13.5f
-        gravity = Gravity.CENTER
-        setTypeface(null, Typeface.BOLD)
-        setTextColor(Ui.TEXT)
-        setPadding(pad(14), pad(13), pad(14), pad(13))
-        Ui.tappable(this, Ui.rounded(Ui.SURFACE_HI, 14, context, Ui.BORDER))
-        setOnClickListener { onClick() }
-    }
-
-    private fun stepper(text: String, accent: Boolean = false, onClick: () -> Unit) = TextView(this).apply {
-        this.text = text
-        textSize = 22f
-        gravity = Gravity.CENTER
-        setTypeface(null, Typeface.BOLD)
-        setTextColor(if (accent) Ui.ON_ACCENT else Ui.TEXT)
-        Ui.tappable(this, Ui.rounded(if (accent) Ui.ACCENT else Ui.SURFACE_HI, 14, context, if (accent) null else Ui.BORDER))
-        layoutParams = LinearLayout.LayoutParams(pad(54), pad(50))
-        setOnClickListener { onClick() }
     }
 
     private fun clipboardText(): String? {
