@@ -835,6 +835,31 @@ class ReaderActivity : AppCompatActivity() {
 
         web.webViewClient = object : WebViewClient() {
 
+            /**
+             * 만화 사이트 밖으로 나가는 이동을 막는다.
+             *
+             * 이 화면에는 주소창이 없어서 광고가 다른 사이트로 넘기면 그 페이지가
+             * 앱 화면처럼 보인다. 그래서 같은 모양의 주소(번호만 다른 것 포함)만
+             * 앱 안에서 열고, 나머지는 막는다. 사용자가 직접 누른 것이면 브라우저로
+             * 열지 물어본다. 브라우저에는 주소창이 있어서 어디인지 보인다.
+             */
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val req = request ?: return false
+                if (!req.isForMainFrame) return false
+                val uri = req.url ?: return true
+                val scheme = uri.scheme?.lowercase()
+                // intent:, market: 같은 건 원래도 열리지 않았다. 앱을 띄우지 않고 막는다.
+                if (scheme != "http" && scheme != "https") return true
+                if (isSiteHost(uri.host)) return false
+
+                if (req.hasGesture()) {
+                    askOpenOutside(uri)
+                } else {
+                    toast("광고로 보이는 다른 사이트 이동을 막았습니다.")
+                }
+                return true
+            }
+
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                 super.doUpdateVisitedHistory(view, url, isReload)
                 if (url != null) autoSaveEpisode(url)
@@ -866,6 +891,39 @@ class ReaderActivity : AppCompatActivity() {
                 showError()
             }
         }
+    }
+
+    /** 저장된 도메인과 같은 모양(번호만 다를 수 있음)이거나 지금 보는 페이지와 같은 호스트인지. */
+    private fun isSiteHost(host: String?): Boolean {
+        val h = host?.lowercase()?.removePrefix("www.") ?: return false
+        if (h.isEmpty()) return false
+        if (h == SiteUrl.buildHost(store.domain).lowercase().removePrefix("www.")) return true
+        val current = web.url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+            ?.lowercase()?.removePrefix("www.")
+        if (current != null && h == current) return true
+        val parsed = SiteUrl.parseHost(h) ?: return false
+        val mine = SiteUrl.parseHost(SiteUrl.buildHost(store.domain).lowercase().removePrefix("www."))
+            ?: return false
+        return SiteUrl.sameShape(parsed, mine)
+    }
+
+    private var outsideDialog: AlertDialog? = null
+
+    private fun askOpenOutside(uri: Uri) {
+        if (isFinishing || isDestroyed) return
+        if (outsideDialog?.isShowing == true) return
+        outsideDialog = AlertDialog.Builder(this)
+            .setTitle("다른 사이트로 가려고 합니다")
+            .setMessage("${uri.host}\n\n광고일 수 있어 앱 안에서는 열지 않았습니다.")
+            .setPositiveButton("막기", null)
+            .setNeutralButton("브라우저로 열기") { _, _ ->
+                try {
+                    startActivity(Intent(Intent.ACTION_VIEW, uri))
+                } catch (e: Exception) {
+                    toast("열 수 있는 브라우저가 없습니다.")
+                }
+            }
+            .show()
     }
 
     /** 번호를 대신 바꾸지 않는다. 무엇을 할지는 사용자가 고른다. */

@@ -99,23 +99,30 @@
 ## 빌드
 
 `android/**` 를 푸시하면 GitHub Actions 가 APK를 만듭니다.
-Actions 탭 → 해당 실행 → Artifacts 의 `toon-shortcut-apk` 를 받아 폰에 설치하세요.
+만든 APK 는 `latest` 릴리스에 올라갑니다(Actions 실행의 Artifacts 에도 남습니다).
 설치 시 "출처를 알 수 없는 앱" 허용이 한 번 필요합니다.
 
-로컬 빌드는 Android SDK가 있으면:
-
-```bash
-cd android && gradle assembleRelease
-```
+로컬 빌드는 Android SDK가 있으면 `cd android && gradle assembleRelease` 입니다.
+결과는 서명되지 않은 APK 라서 설치하려면 따로 서명해야 합니다.
 
 ## 서명 키에 대해
 
-`keystore/personal.jks` 를 저장소에 넣어 두었습니다. 빌드마다 서명이 달라지면
-앱을 **지우고 다시 깔아야** 업데이트가 되기 때문입니다. 키를 고정하면 덮어쓰기 설치가 됩니다.
+처음에는 `keystore/personal.jks` 와 비밀번호를 저장소에 그대로 넣어 두었습니다.
+저장소가 공개라 누구나 이 앱과 같은 서명의 APK 를 만들 수 있었습니다.
 
-개인 사이드로드 전용 자체 서명 키라 보호하는 자산이 없습니다.
-플레이스토어에 올리거나 남에게 배포할 계획이 생기면 이 키는 버리고
-GitHub Secrets 로 옮겨야 합니다.
+그래서 v3.10 부터 새 키로 바꿨습니다(키 교체, key rotation).
+
+- `keystore/rotated.jks.enc`: 새 키. AES-256 으로 암호화돼 있고, 암호는 저장소
+  비밀 값 `SIGNING_PASSWORD` 에만 있습니다.
+- `keystore/personal.jks`: 예전 키. 이미 공개돼 믿을 수 없지만, 기존 설치본 위에
+  덮어쓰기가 되도록 새 키와 이어 주는 데(lineage) 씁니다.
+
+서명은 그레이들이 아니라 Actions 에서 `apksigner` 로 합니다. 안드로이드 9 이상에서
+새 키로 서명된 앱이 한 번 깔리면, 그 뒤로는 예전 키로만 서명된 APK 가 이 앱을
+덮어쓸 수 없습니다. 지우고 다시 깔 필요는 없습니다.
+
+`SIGNING_PASSWORD` 를 잃어버리면 새 키를 쓸 수 없어 앱을 지우고 다시 깔아야 합니다.
+암호는 따로 적어 두세요.
 
 ## 구조
 

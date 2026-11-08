@@ -40,10 +40,50 @@ jobs:
         working-directory: android
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Rename APK
+      # 서명은 그레이들이 아니라 여기서 한다. 키를 바꾸면서도(키 교체, key rotation)
+      # 기존 앱 위에 덮어쓰기 설치가 되도록 apksigner 로 두 키를 이어서 서명한다.
+      #
+      # - personal.jks: 예전 키. 저장소에 공개돼 있어 더는 믿을 수 없다. 덮어쓰기
+      #   설치를 이어 주는 데만 쓴다.
+      # - rotated.jks.enc: 새 키. 암호화해서 넣어 두었고, 암호는 저장소 비밀 값
+      #   SIGNING_PASSWORD 에만 있다.
+      #
+      # 새 키로 서명된 앱이 한 번 깔리면(안드로이드 9 이상), 그 뒤로는 예전 키로만
+      # 서명된 APK 가 이 앱을 덮어쓸 수 없다(lineage 의 rollback 권한이 기본으로 꺼져 있음).
+      - name: Sign APK
+        env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          OLD_PASS: toonshortcut
         run: |
-          mkdir -p out
-          cp android/app/build/outputs/apk/release/app-release.apk out/manhwa-shortcut.apk
+          set -euo pipefail
+          if [ -z "${SIGNING_PASSWORD:-}" ]; then
+            echo "::error::저장소 비밀 값 SIGNING_PASSWORD 가 없습니다. Settings → Secrets and variables → Actions 에 넣어 주세요."
+            exit 1
+          fi
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          echo "build-tools: $BT"
+          K="$RUNNER_TEMP/keys"
+          mkdir -p "$K" out
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -in android/keystore/rotated.jks.enc -out "$K/rotated.jks" -pass env:SIGNING_PASSWORD
+
+          "$BT/apksigner" rotate --out "$K/lineage.bin" \
+            --old-signer --ks android/keystore/personal.jks --ks-key-alias personal --ks-pass env:OLD_PASS \
+            --new-signer --ks "$K/rotated.jks" --ks-key-alias rotated --ks-pass env:SIGNING_PASSWORD
+
+          "$BT/zipalign" -f -p 4 \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk "$K/aligned.apk"
+
+          "$BT/apksigner" sign \
+            --ks android/keystore/personal.jks --ks-key-alias personal --ks-pass env:OLD_PASS \
+            --next-signer --ks "$K/rotated.jks" --ks-key-alias rotated --ks-pass env:SIGNING_PASSWORD \
+            --lineage "$K/lineage.bin" --rotation-min-sdk-version 28 \
+            --v4-signing-enabled false \
+            --out out/manhwa-shortcut.apk "$K/aligned.apk"
+          rm -rf "$K"
+
+          "$BT/apksigner" verify -v --print-certs out/manhwa-shortcut.apk
+          "$BT/apksigner" lineage --in out/manhwa-shortcut.apk --print-certs
           ls -lh out/
 
       # 폰에서 받기 편하도록 zip이 아닌 APK 그대로 내려받게 한다.

@@ -12,29 +12,16 @@ android {
         // 어댑티브 아이콘만 쓰기 위해 26 이상. 안드로이드 8.0(2017) 이후 전부 해당된다.
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "3.9"
+        versionCode = 31
+        versionName = "3.10"
     }
 
-    // 앱을 새로 빌드해도 서명이 같아야 "덮어쓰기 설치"가 된다.
-    // 서명이 바뀌면 기존 앱을 지우고 다시 깔아야 하므로 키를 저장소에 고정해 둔다.
-    // 개인 사이드로드 전용 키라 비밀 값이 아니다.
-    signingConfigs {
-        create("personal") {
-            storeFile = file("../keystore/personal.jks")
-            storePassword = "toonshortcut"
-            keyAlias = "personal"
-            keyPassword = "toonshortcut"
-        }
-    }
-
+    // 서명은 GitHub Actions 에서 apksigner 로 한다(.github/workflows/android.yml).
+    // 예전 키에서 새 키로 넘어가는 교체 서명이라 그레이들 설정으로는 할 수 없다.
+    // 그래서 release 는 서명 없이 만든다(app-release-unsigned.apk).
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("personal")
-        }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("personal")
         }
     }
 
