@@ -56,14 +56,26 @@ jobs:
           OLD_PASS: toonshortcut
         run: |
           set -euo pipefail
-          if [ -z "${SIGNING_PASSWORD:-}" ]; then
-            echo "::error::저장소 비밀 값 SIGNING_PASSWORD 가 없습니다. Settings → Secrets and variables → Actions 에 넣어 주세요."
-            exit 1
-          fi
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           echo "build-tools: $BT"
           K="$RUNNER_TEMP/keys"
           mkdir -p "$K" out
+
+          # 비밀 값을 아직 안 넣었으면 예전 키로만 서명해서 업데이트는 계속 나가게 한다.
+          # 키 교체는 비밀 값을 넣은 다음 빌드부터 적용된다.
+          if [ -z "${SIGNING_PASSWORD:-}" ]; then
+            echo "::warning::SIGNING_PASSWORD 가 없어 예전 키로만 서명합니다. Settings → Secrets and variables → Actions 에 넣으면 새 키로 바뀝니다."
+            "$BT/zipalign" -f -p 4 \
+              android/app/build/outputs/apk/release/app-release-unsigned.apk "$K/aligned.apk"
+            "$BT/apksigner" sign \
+              --ks android/keystore/personal.jks --ks-key-alias personal --ks-pass env:OLD_PASS \
+              --v4-signing-enabled false \
+              --out out/manhwa-shortcut.apk "$K/aligned.apk"
+            rm -rf "$K"
+            "$BT/apksigner" verify -v --print-certs out/manhwa-shortcut.apk
+            exit 0
+          fi
+
           openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
             -in android/keystore/rotated.jks.enc -out "$K/rotated.jks" -pass env:SIGNING_PASSWORD
 

@@ -131,6 +131,24 @@ class ReaderActivity : AppCompatActivity() {
             })()
         """.trimIndent()
 
+        /**
+         * 사이트의 "이전 화" 버튼이 가리키는 절대 주소. 꺼져 있거나 없으면 빈 문자열.
+         * 지금 페이지가 저장된 회차의 바로 다음 화인지 알아볼 때 쓴다.
+         */
+        private val JS_PREV_HREF = """
+            (function () {
+              try {
+                var a = document.querySelector(${JSONObject.quote(SiteUrl.PREV_LINK_SELECTOR)});
+                if (!a) return "";
+                var href = (a.getAttribute("href") || "").trim();
+                if (href === "" || href === "#" || /^javascript:/i.test(href)) return "";
+                return new URL(href, location.href).href;
+              } catch (e) {
+                return "";
+              }
+            })()
+        """.trimIndent()
+
         private val JS_PAGE_DUMP = """
             (function () {
               try {
@@ -556,6 +574,43 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     /**
+     * 주소 모양이 달라도 사이트 버튼으로 이어지면 저장한다.
+     *
+     * 지금 페이지의 "이전 화" 버튼이 저장된 회차를 가리키면, 지금 페이지는 저장된
+     * 회차의 바로 다음 화다. "소녀바둑_1부_40화" → "소녀바둑_2부_1화",
+     * "…_121화" → "…_EP.122" 처럼 이름 짓는 방식이 바뀌어도 사이트가 직접 이어 둔
+     * 링크라 틀리지 않는다. 주소로 같은 작품인지 따지는 [autoSaveEpisode] 가
+     * 놓치는 경우를 메운다.
+     */
+    private fun followSiteChain() {
+        if (!store.autoSaveEpisode) return
+        val c = comic ?: return
+        val viewing = web.url?.let { SiteUrl.parseInput(it) }?.path ?: return
+        if (SiteUrl.decodeUri(viewing) == SiteUrl.decodeUri(c.path)) return
+
+        web.evaluateJavascript(JS_PREV_HREF) { raw ->
+            if (isFinishing || isDestroyed) return@evaluateJavascript
+            val href = try {
+                JSONTokener(raw ?: "").nextValue() as? String
+            } catch (e: Exception) {
+                null
+            }
+            if (href.isNullOrBlank()) return@evaluateJavascript
+            val prev = SiteUrl.parseInput(href)?.path ?: return@evaluateJavascript
+            val cur = comic ?: return@evaluateJavascript
+            if (SiteUrl.decodeUri(prev) != SiteUrl.decodeUri(cur.path)) return@evaluateJavascript
+            // 그사이 다른 페이지로 넘어갔으면 저장하지 않는다.
+            val still = web.url?.let { SiteUrl.parseInput(it) }?.path
+            if (still != viewing) return@evaluateJavascript
+
+            store.updateComic(comicId, path = viewing)
+            toast("${SiteUrl.episodeLabel(viewing) ?: "다음 화"} 저장")
+            refreshTitle()
+            refreshNextFromPage()
+        }
+    }
+
+    /**
      * 지금 보는 페이지의 사이트 "다음 화" 버튼으로 목록의 표시를 갱신한다.
      * 새 회차 확인과 같은 기준이다. 버튼이 살아 있으면 새 회차, 꺼져 있으면 최신.
      *
@@ -873,6 +928,7 @@ class ReaderActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 swipe.isRefreshing = false
                 if (url != null) autoSaveEpisode(url)
+                followSiteChain()
                 refreshTitle()
                 refreshNextFromPage()
                 scanNeighbors()

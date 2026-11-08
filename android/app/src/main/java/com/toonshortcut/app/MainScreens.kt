@@ -193,6 +193,16 @@ abstract class MainScreen(
     /** "70화까지 봄" 처럼. 회차 번호가 없는 주소면 그냥 "저장한 회차". */
     protected fun seen(c: Comic, suffix: String): String = ep(c)?.let { it + suffix } ?: "저장한 회차"
 
+    /**
+     * 새 회차 카드 아랫줄. "189화까지 봄 · 다음 190화"
+     * 사이트 다음 화 버튼이 가리킨 회차를 같이 보여줘서, 이미 본 회차라면
+     * 저장이 뒤처진 것을 바로 알 수 있게 한다.
+     */
+    protected fun freshSub(c: Comic, suffix: String): String {
+        val nxt = c.latestPath?.let { SiteUrl.episodeLabel(it) }
+        return seen(c, suffix) + (nxt?.let { " · 다음 $it" } ?: "")
+    }
+
     protected fun isTrouble(c: Comic) = c.next == NextStatus.FAILED || c.next == NextStatus.NO_EPISODE
 
     /** 누르면 열고, 길게 누르면 메뉴. 모든 화면에서 같다. */
@@ -427,7 +437,7 @@ private class TimelineScreen(ctx: Context, host: MainHost, store: Store) : MainS
         bindComic(c, Ui.rounded(WHITE, 12, ctx, LINE), RIPPLE_ON_LIGHT)
         val texts = vcol()
         texts.addView(oneLine(text(c.title, 15f, INK, 800)))
-        texts.addView(oneLine(text(seen(c, "까지 봄"), 12f, DIM)))
+        texts.addView(oneLine(text(freshSub(c, "까지 봄"), 12f, DIM)))
         addView(texts, grow())
         val next = hrow().apply {
             setPadding(dp(12), 0, dp(12), 0)
@@ -713,7 +723,7 @@ private class IndexScreen(ctx: Context, host: MainHost, store: Store) : MainScre
         addView(avatar(c.title, ACCENT, ON_ACCENT, 15f), box(36, 36))
         val texts = vcol()
         texts.addView(oneLine(text(c.title, 15f, TEXT, 700)))
-        texts.addView(oneLine(text(seen(c, "까지 봄"), 12f, DIM)))
+        texts.addView(oneLine(text(freshSub(c, "까지 봄"), 12f, DIM)))
         addView(texts, grow(12))
         val next = text("다음 화", 14f, ON_ACCENT, 700).apply {
             gravity = Gravity.CENTER
@@ -1008,7 +1018,7 @@ private class FeedScreen(ctx: Context, host: MainHost, store: Store) : MainScree
         addView(av, box(40, 40))
         val texts = vcol()
         texts.addView(oneLine(text(boldLead(c.title, " 다음 화가 올라왔어요"), 14f, INK)))
-        texts.addView(oneLine(text(seen(c, "까지 봤어요"), 12f, DIM)))
+        texts.addView(oneLine(text(freshSub(c, "까지 봤어요"), 12f, DIM)))
         addView(texts, grow(10))
         val go = text("보기", 14f, WHITE, 800).apply {
             gravity = Gravity.CENTER

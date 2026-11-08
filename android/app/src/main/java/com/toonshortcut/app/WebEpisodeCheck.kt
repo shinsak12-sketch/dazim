@@ -175,18 +175,25 @@ class WebEpisodeCheck(
             val nextPath = o.optString("next", "").takeIf { it.startsWith("/") }
             val hint = o.optString("hint", "")
 
+            val state = o.optString("state")
             val outcome = when {
                 fetchError != null -> Outcome(id, null, null, "$fetchError (상태 $status)")
-                o.optString("state") == "next" -> Outcome(id, true, nextPath, null)
-                o.optString("state") == "last" -> Outcome(id, false, null, null)
+                state == "next" -> Outcome(id, true, nextPath, null)
+                // 버튼은 켜져 있었지만 가리키는 회차가 열리지 않았다. 아직 안 올라온 것으로 본다.
+                state == "ghost" -> Outcome(id, false, null, null)
+                state == "last" -> Outcome(id, false, null, null)
                 else -> Outcome(id, null, null, "다음 화 버튼을 찾지 못했습니다")
             }
 
+            val saved = o.optString("url", "").let { SiteUrl.decodeUri(it).removePrefix("/").removeSuffix(".html") }
             log.append("[$title] ")
             when {
                 outcome.error != null -> log.append("실패: ${outcome.error}")
-                outcome.hasNext == true -> log.append("새 회차 있음 → ${nextPath?.let { SiteUrl.decodeUri(it) } ?: "(주소 없음)"}")
-                else -> log.append("최신 (다음 화 버튼 꺼짐${if (hint.isNotEmpty()) ": $hint" else ""})")
+                outcome.hasNext == true -> log.append(
+                    "새 회차 있음: $saved → ${nextPath?.let { SiteUrl.decodeUri(it).removePrefix("/").removeSuffix(".html") } ?: "(주소 없음)"}",
+                )
+                state == "ghost" -> log.append("최신 (다음 화 버튼은 켜져 있으나 그 회차가 열리지 않음: $hint)")
+                else -> log.append("최신: $saved (다음 화 버튼 꺼짐${if (hint.isNotEmpty()) ": $hint" else ""})")
             }
             log.append("  (상태 $status, ${size}바이트)\n")
             // 실패했을 때는 무엇을 열었고 거기서 무엇을 봤는지가 가장 중요한 단서다.
@@ -246,25 +253,47 @@ class WebEpisodeCheck(
           function next() {
             if (idx >= tasks.length) return;
             var t = tasks[idx++];
-            var status = 0;
+            var e = { id: t.id, title: t.title, url: t.url, status: 0, size: 0 };
             fetch(t.url, { credentials: "omit" })
-              .then(function (r) { status = r.status; return r.text(); })
+              .then(function (r) { e.status = r.status; return r.text(); })
               .then(function (html) {
-                var e = { id: t.id, title: t.title, url: t.url, status: status, size: html.length };
-                if (status !== 200) {
+                e.size = html.length;
+                if (e.status !== 200) {
                   e.error = "저장된 회차 페이지가 열리지 않음";
-                } else {
-                  var j = judge(html, t.url);
-                  e.state = j.state;
-                  e.next = j.next || "";
-                  e.hint = j.hint || "";
+                  return;
                 }
-                record(e);
+                var j = judge(html, t.url);
+                e.state = j.state;
+                e.next = j.next || "";
+                e.hint = j.hint || "";
+                if (e.state !== "next" || !e.next) return;
+
+                // 버튼이 켜져 있어도 그 회차가 정말 열리는지 한 번 더 본다.
+                // 아직 안 올라온 회차를 가리키는 경우를 거른다.
+                return fetch(e.next, { credentials: "omit" })
+                  .then(function (r2) {
+                    e.nextStatus = r2.status;
+                    var landed = "";
+                    try { landed = new URL(r2.url).pathname; } catch (x) {}
+                    return r2.text().then(function (h2) {
+                      var d2 = new DOMParser().parseFromString(h2, "text/html");
+                      var episode = !!d2.querySelector(NEXT_SEL + ", .toon-nav, .bottom-navbar");
+                      if (r2.status !== 200 || landed === "/" || !episode) {
+                        e.state = "ghost";
+                        e.hint = "상태 " + r2.status + (landed ? ", 도착 " + landed : "") +
+                                 (episode ? "" : ", 회차 화면 아님");
+                      }
+                    });
+                  })
+                  .catch(function (err) {
+                    // 두 번째 확인만 실패했으면 버튼을 믿는다.
+                    e.nextCheck = String((err && err.message) || err);
+                  });
               })
               .catch(function (err) {
-                record({ id: t.id, title: t.title, url: t.url, status: status, size: 0,
-                         error: String((err && err.message) || err) });
-              });
+                e.error = String((err && err.message) || err);
+              })
+              .then(function () { record(e); });
           }
 
           for (var k = 0; k < $CONCURRENCY && k < tasks.length; k++) next();

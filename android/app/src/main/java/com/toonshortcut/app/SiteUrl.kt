@@ -381,6 +381,9 @@ object SiteUrl {
      */
     const val NEXT_LINK_SELECTOR = "a.tkbn-next"
 
+    /** 사이트 아래쪽 바의 "이전 화" 버튼. 첫 화에서는 다음 화 버튼처럼 꺼져 있다. */
+    const val PREV_LINK_SELECTOR = "a.tkbn-prev"
+
     /**
      * 목록 버튼의 링크를 저장하는 형태(인코딩된 경로)로 맞춘다. 쓸 수 없으면 null.
      * 절대 주소와 "/…" 경로를 둘 다 받는다. 호스트는 버린다. 번호가 자주 바뀐다.
