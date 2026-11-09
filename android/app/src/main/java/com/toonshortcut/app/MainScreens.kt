@@ -35,7 +35,7 @@ interface MainHost {
     /** 저장한 회차를 연다. */
     fun openComic(c: Comic)
 
-    /** 사이트가 알려준 다음 화를 연다. */
+    /** 새 회차가 있는 만화를 연다. 보던 회차 그대로 연다. */
     fun openNew(c: Comic)
 
     /** 길게 눌렀을 때 메뉴(수정, 삭제 등). */
@@ -444,7 +444,7 @@ private class TimelineScreen(ctx: Context, host: MainHost, store: Store) : MainS
             Ui.tappable(this, Ui.rounded(ACCENT_SOFT, 10, ctx), RIPPLE_ON_LIGHT)
             setOnClickListener { host.openNew(c) }
         }
-        next.addView(text("다음 화", 14f, ACCENT, 800))
+        next.addView(text("이어 보기", 14f, ACCENT, 800))
         next.addView(icon(R.drawable.ic_arrow, ACCENT), box(13, 13).apply { leftMargin = dp(4) })
         addView(next, LinearLayout.LayoutParams(WRAP, dp(44)).apply { leftMargin = dp(8) })
     }
@@ -725,7 +725,7 @@ private class IndexScreen(ctx: Context, host: MainHost, store: Store) : MainScre
         texts.addView(oneLine(text(c.title, 15f, TEXT, 700)))
         texts.addView(oneLine(text(freshSub(c, "까지 봄"), 12f, DIM)))
         addView(texts, grow(12))
-        val next = text("다음 화", 14f, ON_ACCENT, 700).apply {
+        val next = text("이어 보기", 14f, ON_ACCENT, 700).apply {
             gravity = Gravity.CENTER
             setPadding(dp(14), 0, dp(14), 0)
             Ui.tappable(this, Ui.rounded(ACCENT, 999, ctx), RIPPLE_ON_LIGHT)

@@ -12,8 +12,8 @@ android {
         // 어댑티브 아이콘만 쓰기 위해 26 이상. 안드로이드 8.0(2017) 이후 전부 해당된다.
         minSdk = 26
         targetSdk = 35
-        versionCode = 32
-        versionName = "3.11"
+        versionCode = 33
+        versionName = "3.12"
     }
 
     // 서명은 GitHub Actions 에서 apksigner 로 한다(.github/workflows/android.yml).

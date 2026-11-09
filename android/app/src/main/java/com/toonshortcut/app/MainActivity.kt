@@ -156,19 +156,11 @@ class MainActivity : AppCompatActivity(), MainHost {
         )
     }
 
-    /** 사이트의 다음 화 버튼이 가리키던 주소로 바로 연다. 없으면 저장한 회차. */
-    override fun openNew(c: Comic) {
-        val exact = c.latestPath
-        if (exact.isNullOrBlank()) {
-            openComic(c)
-            return
-        }
-        startActivity(
-            Intent(this, ReaderActivity::class.java)
-                .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id)
-                .putExtra(ReaderActivity.EXTRA_PATH, exact),
-        )
-    }
+    /**
+     * 새 회차가 있어도 보던 회차(저장된 회차)를 연다.
+     * 다음 화로 바로 건너뛰면 어디까지 봤는지 헷갈린다. 넘기는 건 보는 사람이 한다.
+     */
+    override fun openNew(c: Comic) = openComic(c)
 
     override fun showStatus(c: Comic) {
         when (c.next) {
