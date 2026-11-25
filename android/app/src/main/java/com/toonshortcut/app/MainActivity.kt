@@ -339,19 +339,42 @@ class MainActivity : AppCompatActivity(), MainHost {
     // ------------------------------------------------------------------ 대화상자
 
     override fun comicMenu(c: Comic) {
-        val items = arrayOf("수정", "제목 새로 뽑기", "위로", "아래로", "삭제")
+        val backupItem = if (c.backupPath != null) {
+            "예비 사이트로 열기" + (c.backupLabel?.let { " ($it)" } ?: "")
+        } else {
+            "예비 사이트로 열기 (주소 없음)"
+        }
+        val items = arrayOf(backupItem, "수정", "제목 새로 뽑기", "위로", "아래로", "삭제")
         AlertDialog.Builder(this)
             .setTitle(c.title)
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> showComicDialog(existing = c)
-                    1 -> retitle(c)
-                    2 -> { store.move(c.id, -1); render() }
-                    3 -> { store.move(c.id, 1); render() }
-                    4 -> confirmDelete(c)
+                    0 -> openBackup(c)
+                    1 -> showComicDialog(existing = c)
+                    2 -> retitle(c)
+                    3 -> { store.move(c.id, -1); render() }
+                    4 -> { store.move(c.id, 1); render() }
+                    5 -> confirmDelete(c)
                 }
             }
             .show()
+    }
+
+    /**
+     * 원래 사이트가 막혔을 때 예비 사이트(예: 뉴토끼)로 연다.
+     * 예비 주소를 넣은 적이 없으면 수정 창을 띄운다.
+     */
+    private fun openBackup(c: Comic) {
+        if (store.backupDomain == null || c.backupPath == null) {
+            toast("예비 사이트 주소를 넣어 주세요.")
+            showComicDialog(existing = c)
+            return
+        }
+        startActivity(
+            Intent(this, ReaderActivity::class.java)
+                .putExtra(ReaderActivity.EXTRA_COMIC_ID, c.id)
+                .putExtra(ReaderActivity.EXTRA_BACKUP, true),
+        )
     }
 
     /** 지금 주소를 기준으로 제목을 다시 뽑는다. 예전에 잘못 저장된 제목을 되살릴 때 쓴다. */
@@ -410,6 +433,16 @@ class MainActivity : AppCompatActivity(), MainHost {
         box.addView(label("목록 주소 (자동 추측이 틀릴 때만)"))
         box.addView(listInput)
 
+        val backupInput = EditText(this).apply {
+            hint = "예: https://newtoki1.org/webtoon/…"
+            setSingleLine(true)
+            val bd = store.backupDomain
+            val bp = existing?.backupPath
+            setText(if (bd != null && bp != null) SiteUrl.decodeUri(SiteUrl.buildUrl(bd, bp)) else "")
+        }
+        box.addView(label("예비 사이트 주소 (선택 · 원래 사이트가 막힐 때)"))
+        box.addView(backupInput)
+
         AlertDialog.Builder(this)
             .setTitle(if (existing == null) "만화 추가" else "수정")
             .setView(box)
@@ -419,13 +452,14 @@ class MainActivity : AppCompatActivity(), MainHost {
                     urlInput.text.toString(),
                     titleInput.text.toString(),
                     listInput.text.toString(),
+                    backupInput.text.toString(),
                 )
             }
             .setNegativeButton("취소", null)
             .show()
     }
 
-    private fun saveComic(existing: Comic?, rawUrl: String, rawTitle: String, rawList: String) {
+    private fun saveComic(existing: Comic?, rawUrl: String, rawTitle: String, rawList: String, rawBackup: String) {
         val parsed = SiteUrl.parseInput(rawUrl.trim())
         if (parsed == null || parsed.path.isBlank()) {
             toast("주소를 알아볼 수 없습니다.")
@@ -438,11 +472,31 @@ class MainActivity : AppCompatActivity(), MainHost {
             if (raw.isEmpty()) "" else SiteUrl.parseInput(raw)?.path ?: ""
         }
 
-        if (existing == null) {
+        val id = if (existing == null) {
             val added = store.addComic(title, parsed.path)
             if (listPath.isNotEmpty()) store.updateComic(added.id, listPath = listPath)
+            added.id
         } else {
             store.updateComic(existing.id, title = title, path = parsed.path, listPath = listPath)
+            existing.id
+        }
+
+        // 예비 사이트 주소. 비우면 지운다. 도메인은 모든 만화가 같이 쓴다.
+        val backupRaw = rawBackup.trim()
+        if (backupRaw.isEmpty()) {
+            if (existing?.backupPath != null) store.setBackup(id, null, null)
+        } else {
+            val b = SiteUrl.parseInput(backupRaw)
+            if (b == null || b.path.isBlank() || b.path == "/") {
+                toast("예비 사이트 주소를 알아볼 수 없어 넣지 않았습니다.")
+            } else {
+                b.domain?.let { store.backupDomain = it }
+                if (store.backupDomain == null) {
+                    toast("예비 사이트는 https:// 로 시작하는 전체 주소로 넣어 주세요.")
+                } else if (b.path != existing?.backupPath) {
+                    store.setBackup(id, b.path, null)
+                }
+            }
         }
 
         // 붙여넣은 주소의 도메인이 다르면 갱신할지 물어본다.

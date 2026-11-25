@@ -50,6 +50,8 @@ class ReaderActivity : AppCompatActivity() {
         const val EXTRA_EPISODE = "episode"
         /** 사이트가 알려준 주소로 바로 열 때. 번호만으로는 만들 수 없는 주소가 있다. */
         const val EXTRA_PATH = "path"
+        /** 예비 사이트로 열 때. */
+        const val EXTRA_BACKUP = "backup"
 
         /**
          * 페이지 안의 회차 주소를 모은다.
@@ -222,8 +224,16 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var errorBar: LinearLayout
     private lateinit var errorText: TextView
+    private lateinit var backupButton: TextView
 
     private var comicId: String = ""
+
+    /**
+     * 예비 사이트로 보고 있는지. 예비 사이트는 주소 생김새도 화면 구조도 달라서
+     * 회차 자동 저장, 이웃 회차 찾기, 다음 화 판정을 하지 않는다.
+     * 보던 위치는 페이지 제목에 만화 제목이 들어 있을 때만 저장한다.
+     */
+    private var backup = false
 
     /** 아래 바의 회차 넘기기 버튼. 다음 회차가 없으면 흐리게 둔다. */
     private lateinit var flipButton: TextView
@@ -252,6 +262,7 @@ class ReaderActivity : AppCompatActivity() {
         // 사이트가 알려준 주소가 있으면 그것을 쓴다. 주소 끝에 해시가 붙는
         // 작품이 있어서("71화-22a5af") 회차 번호만으로는 주소를 만들 수 없다.
         // 번호로 만드는 쪽은 그런 주소가 없을 때의 대비책이다.
+        backup = intent.getBooleanExtra(EXTRA_BACKUP, false) && store.backupDomain != null
         val exactPath = intent.getStringExtra(EXTRA_PATH)
         val jumpTo = intent.getIntExtra(EXTRA_EPISODE, -1)
         if (!exactPath.isNullOrBlank()) {
@@ -387,6 +398,13 @@ class ReaderActivity : AppCompatActivity() {
         row.addWithGap(softButton("다시 시도") { load() }, dp(6))
         row.addWithGap(softButton("닫기") { errorBar.visibility = View.GONE }, dp(6))
         errorBar.addView(row)
+
+        backupButton = accentButton("예비 사이트로 열기") { switchSite(true) }
+        errorBar.addView(
+            backupButton,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { topMargin = dp(8) },
+        )
         return errorBar
     }
 
@@ -426,13 +444,14 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun showMenu() {
-        val d = store.domain
+        val d = activeDomain()
         val auto = store.autoSaveEpisode
         val items = arrayOf(
             "새로고침",
             "주소 번호 내리기 (${d.num} → ${d.num - 1})",
             "주소 번호 직접 입력",
             if (auto) "회차 자동 저장 끄기 (지금 켜짐)" else "회차 자동 저장 켜기 (지금 꺼짐)",
+            if (backup) "원래 사이트로 열기" else "예비 사이트로 열기",
             "브라우저로 열기",
             "이 페이지 진단 기록 복사",
         )
@@ -447,17 +466,37 @@ class ReaderActivity : AppCompatActivity() {
                         toast(if (!auto) "회차를 자동으로 저장합니다." else "회차 자동 저장을 껐습니다.")
                         refreshTitle()
                     }
-                    4 -> openInBrowser()
-                    5 -> copyPageDiagnostics()
+                    4 -> switchSite(!backup)
+                    5 -> openInBrowser()
+                    6 -> copyPageDiagnostics()
                 }
             }
             .show()
     }
 
+    /** 지금 보고 있는 쪽(원래 / 예비) 사이트의 도메인. */
+    private fun activeDomain(): SiteUrl.Domain =
+        if (backup) store.backupDomain ?: store.domain else store.domain
+
+    /** 원래 사이트와 예비 사이트를 오간다. */
+    private fun switchSite(toBackup: Boolean) {
+        if (toBackup && store.backupDomain == null) {
+            toast("예비 사이트 주소가 없습니다. 목록에서 만화를 길게 눌러 [수정]에서 넣어 주세요.")
+            return
+        }
+        backup = toBackup
+        setNeighbors(null, null)
+        refreshTitle()
+        if (toBackup && comic?.backupPath == null) {
+            toast("이 만화의 예비 주소가 없어 예비 사이트 첫 화면을 엽니다. 찾아서 [저장]을 눌러 주세요.")
+        }
+        load()
+    }
+
     private fun askDomainNumber() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
-            setText(store.domain.num.toString())
+            setText(activeDomain().num.toString())
             setSelection(text.length)
         }
         val box = LinearLayout(this).apply {
@@ -470,7 +509,7 @@ class ReaderActivity : AppCompatActivity() {
             .setView(box)
             .setPositiveButton("적용") { _, _ ->
                 val n = input.text.toString().toIntOrNull() ?: return@setPositiveButton
-                store.setDomainNum(n)
+                if (backup) store.setBackupDomainNum(n) else store.setDomainNum(n)
                 errorBar.visibility = View.GONE
                 refreshTitle()
                 load()
@@ -492,6 +531,10 @@ class ReaderActivity : AppCompatActivity() {
 
     /** 지금 보고 있는 주소를 이 만화에 반영한다. 주소 번호와 회차를 한꺼번에 저장한다. */
     private fun saveCurrent() {
+        if (backup) {
+            saveBackupPosition(force = true)
+            return
+        }
         val url = web.url
         if (url == null) {
             toast("아직 페이지가 열리지 않았습니다.")
@@ -728,6 +771,10 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun goNeighbor(forward: Boolean) {
+        if (backup) {
+            toast("예비 사이트에서는 페이지 안의 다음 화 버튼을 써 주세요.")
+            return
+        }
         val link = if (forward) nextLink else prevLink
         if (link == null) {
             toast(
@@ -917,6 +964,11 @@ class ReaderActivity : AppCompatActivity() {
 
             override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
                 super.doUpdateVisitedHistory(view, url, isReload)
+                if (backup) {
+                    refreshTitle()
+                    setNeighbors(null, null)
+                    return
+                }
                 if (url != null) autoSaveEpisode(url)
                 refreshTitle()
                 // 페이지가 바뀌면 이전 페이지에서 찾아둔 주소는 버린다.
@@ -927,6 +979,12 @@ class ReaderActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 swipe.isRefreshing = false
+                if (backup) {
+                    // 제목이 바뀐 뒤라야 어느 만화 페이지인지 알 수 있어서 여기서만 저장한다.
+                    saveBackupPosition()
+                    refreshTitle()
+                    return
+                }
                 if (url != null) autoSaveEpisode(url)
                 followSiteChain()
                 refreshTitle()
@@ -958,9 +1016,61 @@ class ReaderActivity : AppCompatActivity() {
             ?.lowercase()?.removePrefix("www.")
         if (current != null && h == current) return true
         val parsed = SiteUrl.parseHost(h) ?: return false
-        val mine = SiteUrl.parseHost(SiteUrl.buildHost(store.domain).lowercase().removePrefix("www."))
-            ?: return false
-        return SiteUrl.sameShape(parsed, mine)
+        for (d in listOfNotNull(store.domain, store.backupDomain)) {
+            val mine = SiteUrl.parseHost(SiteUrl.buildHost(d).lowercase().removePrefix("www.")) ?: continue
+            if (SiteUrl.sameShape(parsed, mine)) return true
+        }
+        return false
+    }
+
+    // ------------------------------------------------------------------ 예비 사이트
+
+    /**
+     * 예비 사이트에서 보던 위치를 저장한다.
+     *
+     * 예비 사이트 주소에는 작품 이름이 없어서(예: /webtoon/69106589/…) 주소로는
+     * 같은 작품인지 알 수 없다. 페이지 제목에 만화 제목이 들어 있을 때만 저장한다.
+     * [저장] 단추로 부르면(force) 제목을 따지지 않고 지금 페이지를 저장한다.
+     */
+    private fun saveBackupPosition(force: Boolean = false) {
+        val c = comic ?: return
+        val url = web.url ?: return
+        val parsed = SiteUrl.parseInput(url) ?: return
+        if (parsed.path.isBlank() || parsed.path == "/") {
+            if (force) toast("만화 회차 페이지에서 눌러 주세요.")
+            return
+        }
+        val pageTitle = web.title.orEmpty()
+        if (!force) {
+            if (!store.autoSaveEpisode) return
+            if (!titleMatches(c.title, pageTitle)) return
+        }
+
+        // 예비 사이트도 번호가 바뀌면 따라간다.
+        parsed.domain?.let { d ->
+            val cur = store.backupDomain
+            if (cur == null || !SiteUrl.sameShape(d, cur) || d.num != cur.num) store.backupDomain = d
+        }
+        if (parsed.path == c.backupPath) {
+            if (force) toast("이미 저장된 주소입니다.")
+            return
+        }
+        val label = Regex("""(\d+)\s*화""").find(pageTitle)?.let { "${it.groupValues[1]}화" }
+        store.setBackup(comicId, parsed.path, label)
+        toast("예비 사이트 ${label ?: "이 페이지"} 저장")
+        refreshTitle()
+    }
+
+    /** 띄어쓰기·기호를 빼고 견준다. "망나니-소교주로-환생했다" ↔ "망나니 소교주로 환생했다 45화" */
+    private fun titleMatches(comicTitle: String, pageTitle: String): Boolean {
+        fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() }
+        val page = norm(pageTitle)
+        val t = norm(comicTitle)
+        if (t.isEmpty() || page.isEmpty()) return false
+        if (page.contains(t)) return true
+        // "사형집행관 시즌2" 처럼 시즌 표시는 사이트마다 달라서 떼고 한 번 더 본다.
+        val core = t.replace(Regex("(시즌\\d+|season\\d+|\\d+부)$"), "")
+        return core.length >= 2 && core != t && page.contains(core)
     }
 
     private var outsideDialog: AlertDialog? = null
@@ -985,13 +1095,17 @@ class ReaderActivity : AppCompatActivity() {
     /** 번호를 대신 바꾸지 않는다. 무엇을 할지는 사용자가 고른다. */
     private fun showError() {
         errorText.text =
-            "${SiteUrl.buildHost(store.domain)} 를 못 불러왔습니다.\n주소가 막혔다면 번호를 올려 보세요."
+            "${SiteUrl.buildHost(activeDomain())} 를 못 불러왔습니다.\n주소가 막혔다면 번호를 올려 보세요."
+        // 원래 사이트가 막혔을 때만 예비 사이트를 권한다.
+        backupButton.visibility = if (!backup && store.backupDomain != null) View.VISIBLE else View.GONE
         errorBar.visibility = View.VISIBLE
     }
 
     private fun currentUrl(): String {
-        val c = comic ?: return "https://" + SiteUrl.buildHost(store.domain) + "/"
-        return SiteUrl.buildUrl(store.domain, c.path)
+        val d = activeDomain()
+        val c = comic ?: return "https://" + SiteUrl.buildHost(d) + "/"
+        if (backup) return SiteUrl.buildUrl(d, c.backupPath ?: "/")
+        return SiteUrl.buildUrl(d, c.path)
     }
 
     private fun load() {
@@ -1000,7 +1114,11 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun bumpDomain(delta: Int) {
-        val d = store.bumpDomain(delta)
+        val d = if (backup) {
+            store.bumpBackupDomain(delta) ?: return
+        } else {
+            store.bumpDomain(delta)
+        }
         refreshTitle()
         toast("${SiteUrl.buildHost(d)} 로 이동합니다.")
         load()
@@ -1008,6 +1126,17 @@ class ReaderActivity : AppCompatActivity() {
 
     /** 제목에는 저장된 회차를, 아래 줄에는 지금 보고 있는 주소를 보여준다. */
     private fun refreshTitle() {
+        if (backup) {
+            val c = comic
+            val label = c?.backupLabel
+            titleView.text = (c?.title ?: "만화") + if (label != null) " · $label" else ""
+            titleView.setTextColor(Ui.TEXT)
+            val host = web.url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+                ?: SiteUrl.buildHost(activeDomain())
+            hostView.text = "$host · 예비 사이트"
+            hostView.setTextColor(Ui.AMBER)
+            return
+        }
         val c = comic
         val saved = c?.let { SiteUrl.episodeLabel(it.path) }
         val name = c?.title ?: "만화"

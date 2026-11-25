@@ -32,6 +32,13 @@ data class Comic(
      * 갈아끼워서는 주소를 만들 수 없다.
      */
     var latestPath: String? = null,
+    /**
+     * 예비 사이트(예: 뉴토끼)에서 보던 페이지 경로. 사이트마다 주소 생김새가 달라서
+     * 원래 사이트 주소와 따로 둔다. 도메인은 [Store.backupDomain] 하나를 같이 쓴다.
+     */
+    var backupPath: String? = null,
+    /** 예비 사이트에서 보던 회차 표시("73화"). 페이지 제목에서 읽는다. */
+    var backupLabel: String? = null,
 )
 
 /**
@@ -46,6 +53,22 @@ class Store(context: Context) {
         private const val KEY_DOMAIN = "domain"
         private const val KEY_COMICS = "comics"
         private const val KEY_COMICS_2 = "comics2"
+        private const val KEY_BACKUP_DOMAIN = "backup_domain"
+
+        private fun domainToJson(d: SiteUrl.Domain): JSONObject = JSONObject()
+            .put("head", d.head)
+            .put("prefix", d.prefix)
+            .put("suffix", d.suffix)
+            .put("pad", d.pad)
+            .put("num", SiteUrl.clampNum(d.num))
+
+        private fun domainFromJson(o: JSONObject): SiteUrl.Domain = SiteUrl.Domain(
+            head = o.optString("head", ""),
+            prefix = o.optString("prefix", "tkor"),
+            suffix = o.optString("suffix", "com"),
+            pad = o.optInt("pad", 3),
+            num = SiteUrl.clampNum(o.optInt("num", 146)),
+        )
 
         /**
          * 지금 보고 있는 목록 (1 또는 2).
@@ -101,6 +124,43 @@ class Store(context: Context) {
             prefs.edit().putString(KEY_DOMAIN, o.toString()).apply()
         }
 
+    /** 예비 사이트 도메인. 만화마다 예비 주소를 처음 넣을 때 정해진다. */
+    var backupDomain: SiteUrl.Domain?
+        get() {
+            val raw = prefs.getString(KEY_BACKUP_DOMAIN, null) ?: return null
+            return runCatching { domainFromJson(JSONObject(raw)) }.getOrNull()
+        }
+        set(value) {
+            if (value == null) {
+                prefs.edit().remove(KEY_BACKUP_DOMAIN).apply()
+            } else {
+                prefs.edit().putString(KEY_BACKUP_DOMAIN, domainToJson(value).toString()).apply()
+            }
+        }
+
+    fun bumpBackupDomain(delta: Int): SiteUrl.Domain? {
+        val d = backupDomain ?: return null
+        val next = d.copy(num = SiteUrl.clampNum(d.num + delta))
+        backupDomain = next
+        return next
+    }
+
+    fun setBackupDomainNum(num: Int): SiteUrl.Domain? {
+        val d = backupDomain ?: return null
+        val next = d.copy(num = SiteUrl.clampNum(num))
+        backupDomain = next
+        return next
+    }
+
+    /** 예비 사이트 위치를 바꾼다. path 가 null 이면 지운다. */
+    fun setBackup(id: String, path: String?, label: String?) {
+        val list = comics
+        val c = list.firstOrNull { it.id == id } ?: return
+        c.backupPath = path?.ifEmpty { null }
+        c.backupLabel = if (c.backupPath == null) null else label
+        comics = list
+    }
+
     var comics: MutableList<Comic>
         get() {
             val raw = prefs.getString(comicsKey, null) ?: return mutableListOf()
@@ -119,8 +179,13 @@ class Store(context: Context) {
                     val listPath = o.optString("listPath", "").ifEmpty { null }
                     val latestEp = if (o.has("latestEp") && !o.isNull("latestEp")) o.optInt("latestEp") else null
                     val latestPath = o.optString("latestPath", "").ifEmpty { null }
+                    val backupPath = o.optString("backupPath", "").ifEmpty { null }
+                    val backupLabel = o.optString("backupLabel", "").ifEmpty { null }
                     out.add(
-                        Comic(id, o.optString("title", "제목 없음"), path, next, note, listPath, latestEp, latestPath),
+                        Comic(
+                            id, o.optString("title", "제목 없음"), path, next, note, listPath, latestEp, latestPath,
+                            backupPath, backupLabel,
+                        ),
                     )
                 }
                 out
@@ -137,7 +202,9 @@ class Store(context: Context) {
                         .put("nextNote", c.nextNote ?: "")
                         .put("listPath", c.listPath ?: "")
                         .put("latestEp", c.latestEp ?: JSONObject.NULL)
-                        .put("latestPath", c.latestPath ?: ""),
+                        .put("latestPath", c.latestPath ?: "")
+                        .put("backupPath", c.backupPath ?: "")
+                        .put("backupLabel", c.backupLabel ?: ""),
                 )
             }
             prefs.edit().putString(comicsKey, arr.toString()).apply()
@@ -258,13 +325,15 @@ class Store(context: Context) {
                 JSONObject().put("head", d.head).put("prefix", d.prefix)
                     .put("suffix", d.suffix).put("pad", d.pad).put("num", d.num),
             )
+            .put("backupDomain", backupDomain?.let { domainToJson(it) } ?: JSONObject.NULL)
             .put(
                 "comics",
                 JSONArray().apply {
                     for (c in comics) {
                         put(
                             JSONObject().put("title", c.title).put("path", c.path)
-                                .put("listPath", c.listPath ?: ""),
+                                .put("listPath", c.listPath ?: "")
+                                .put("backupPath", c.backupPath ?: ""),
                         )
                     }
                 },
@@ -284,6 +353,7 @@ class Store(context: Context) {
                 num = SiteUrl.clampNum(d.optInt("num", 146)),
             )
         }
+        o.optJSONObject("backupDomain")?.let { backupDomain = domainFromJson(it) }
         val arr = o.optJSONArray("comics") ?: return 0
         val list = comics
         val seen = list.map { it.path }.toMutableSet()
@@ -298,6 +368,7 @@ class Store(context: Context) {
                     title = c.optString("title", SiteUrl.guessTitle(path)),
                     path = path,
                     listPath = c.optString("listPath", "").ifEmpty { null },
+                    backupPath = c.optString("backupPath", "").ifEmpty { null },
                 ),
             )
             added++
